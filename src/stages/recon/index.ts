@@ -22,6 +22,8 @@ export interface ReconResult {
   jsUrls: string[];
   /** In-scope URLs carrying query params — fed to active-injection tools (gated). */
   paramUrls: string[];
+  /** In-scope non-JS endpoints (capped) — reduced to base/unique paths for nuclei. */
+  endpoints: string[];
   /** Count of every asset persisted this run. */
   assetCount: number;
 }
@@ -160,8 +162,12 @@ export async function runRecon(ctx: RunContext): Promise<ReconResult> {
     if (decision.allowed) gated.push(u);
   }
 
-  // 5c) Cap endpoints per host so one noisy source can't explode the scan.
-  const { kept: cappedUrls, truncated } = capEndpointsPerHost(gated, LIMITS.maxEndpointsPerHost);
+  // 5c) Cap per host — but in SEPARATE buckets. JS/static assets must NOT be
+  // trimmed by the HTML-endpoint cap, or retire.js is left with nothing (JS=0).
+  const jsAll = gated.filter((u) => JS_URL.test(u));
+  const nonJs = gated.filter((u) => !JS_URL.test(u));
+
+  const { kept: cappedNonJs, truncated } = capEndpointsPerHost(nonJs, LIMITS.maxEndpointsPerHost);
   for (const [host, dropped] of truncated) {
     ctx.log.warn({ host, dropped, cap: LIMITS.maxEndpointsPerHost }, "recon: endpoint cap reached");
     ctx.bus.stageProgress(
@@ -170,29 +176,35 @@ export async function runRecon(ctx: RunContext): Promise<ReconResult> {
       false,
     );
   }
-
-  const urlSet = new Set<string>(cappedUrls);
-  const jsSet = new Set<string>();
-  const paramSet = new Set<string>();
-  for (const u of cappedUrls) {
-    if (JS_URL.test(u)) jsSet.add(u);
-    if (HAS_PARAM.test(u)) paramSet.add(u);
+  const { kept: cappedJs, truncated: jsTruncated } = capEndpointsPerHost(jsAll, LIMITS.maxJsAssetsPerHost);
+  for (const [host, dropped] of jsTruncated) {
+    ctx.log.warn({ host, dropped, cap: LIMITS.maxJsAssetsPerHost }, "recon: JS asset cap reached");
   }
 
-  for (const u of urlSet) await persistSimple(ctx, "ENDPOINT", u);
+  const endpointSet = new Set<string>([...cappedNonJs, ...cappedJs]);
+  const jsSet = new Set<string>(cappedJs);
+  const paramSet = new Set<string>(cappedNonJs.filter((u) => HAS_PARAM.test(u)));
+
+  for (const u of endpointSet) await persistSimple(ctx, "ENDPOINT", u);
   for (const j of jsSet) await persistSimple(ctx, "JS_ASSET", j);
 
   const assetCount = await prisma.asset.count({ where: { runId: ctx.runId } });
   ctx.log.info(
-    { web: webTargets.length, endpoints: urlSet.size, js: jsSet.size, assetCount },
+    { web: webTargets.length, endpoints: cappedNonJs.length, js: jsSet.size, assetCount },
     "recon: complete",
   );
   await audit({
     runId: ctx.runId,
     actor: ctx.actor,
     action: "STAGE_COMPLETE",
-    detail: { stage: "recon", assetCount, webTargets: webTargets.length },
+    detail: { stage: "recon", assetCount, webTargets: webTargets.length, js: jsSet.size },
   });
 
-  return { webTargets, jsUrls: [...jsSet], paramUrls: [...paramSet], assetCount };
+  return {
+    webTargets,
+    jsUrls: [...jsSet],
+    paramUrls: [...paramSet],
+    endpoints: cappedNonJs,
+    assetCount,
+  };
 }

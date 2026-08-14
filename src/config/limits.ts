@@ -16,8 +16,11 @@ function intFromEnv(name: string, fallback: number): number {
 const MIN = 60 * 1000;
 
 export const LIMITS = {
-  /** Max endpoints kept per host after gating (one noisy source can't explode a scan). */
+  /** Max (non-JS) endpoints kept per host after gating (one noisy source can't explode a scan). */
   maxEndpointsPerHost: intFromEnv("SENTINEL_MAX_ENDPOINTS_PER_HOST", 300),
+
+  /** JS/static assets are capped in a SEPARATE bucket so retire.js always has input. */
+  maxJsAssetsPerHost: intFromEnv("SENTINEL_MAX_JS_ASSETS_PER_HOST", 200),
 
   /** How often a long-running tool emits an elapsed-time progress heartbeat. */
   progressIntervalMs: intFromEnv("SENTINEL_PROGRESS_INTERVAL_MS", 60 * 1000),
@@ -46,6 +49,9 @@ export const LIMITS = {
     retries: intFromEnv("SENTINEL_NUCLEI_RETRIES", 1),
     concurrency: intFromEnv("SENTINEL_NUCLEI_CONCURRENCY", 25),
     maxHostError: intFromEnv("SENTINEL_NUCLEI_MAX_HOST_ERROR", 30),
+    // Templates match on host/base URLs + unique paths — NOT every crawled param
+    // URL. This is the real speed lever: keep the target set small and deduped.
+    maxTargets: intFromEnv("SENTINEL_NUCLEI_MAX_TARGETS", 150),
   },
 
   /** Max param-URLs fed to each active-injection tool (kept bounded even when gated open). */

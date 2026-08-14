@@ -4,6 +4,7 @@ import { run, toolExists } from "../../lib/exec.js";
 import { audit } from "../../lib/audit.js";
 import { rawDir } from "../../lib/paths.js";
 import { readFileIfNonEmpty } from "../../lib/files.js";
+import { mergeJsonlLines } from "../../lib/parse.js";
 import { LIMITS } from "../../config/limits.js";
 import { startHeartbeat } from "../../lib/progress.js";
 /**
@@ -81,22 +82,25 @@ export async function runNuclei(ctx, urls) {
     finally {
         hb.stop();
     }
-    // Prefer the incrementally-written file; fall back to captured stdout.
-    let captured = await readFileIfNonEmpty(outPath);
-    if (!captured && stdout.trim().length > 0) {
-        await writeFile(outPath, stdout, "utf8");
-        captured = stdout;
-    }
-    if (!captured) {
+    // MERGE the -o file with captured stdout: on SIGTERM the file holds only the
+    // flushed lines while stdout holds the tail. Merging + deduping keeps EVERY
+    // emitted finding (the WAF/tech/iis lines that were in stdout but not the file).
+    const fileContent = (await readFileIfNonEmpty(outPath)) ?? "";
+    const merged = mergeJsonlLines([fileContent, stdout]);
+    if (merged.length === 0) {
         ctx.log.warn({ outPath }, "scan: nuclei produced no output");
         return null;
     }
+    // Rewrite the file with the complete, deduped set so Normalize + DefectDojo
+    // import see every captured finding.
+    await writeFile(outPath, merged + "\n", "utf8");
+    const lineCount = merged.split("\n").length;
     if (timedOut) {
-        ctx.log.warn({ outPath, bytes: captured.length }, "scan: nuclei PARTIAL (timed out) — keeping captured findings");
-        ctx.bus.stageProgress("scan", `nuclei timed out — kept ${captured.length} bytes of partial findings`, false);
+        ctx.log.warn({ outPath, lines: lineCount }, "scan: nuclei PARTIAL (timed out) — merged file+stdout");
+        ctx.bus.stageProgress("scan", `nuclei timed out — kept ${lineCount} finding line(s)`, false);
     }
     else {
-        ctx.log.info({ outPath }, "scan: nuclei complete");
+        ctx.log.info({ outPath, lines: lineCount }, "scan: nuclei complete");
     }
     return { tool: "nuclei", dojoScanType: "Nuclei Scan", filePath: outPath, format: "jsonl", target: "aggregate" };
 }

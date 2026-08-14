@@ -1,8 +1,10 @@
 import { audit } from "../../lib/audit.js";
 import { ensureRunDirs } from "../../lib/paths.js";
+import { LIMITS } from "../../config/limits.js";
 import { gate, type RunContext } from "../../core/context.js";
 import type { ReconResult } from "../recon/index.js";
 import type { ScanArtifact } from "./artifacts.js";
+import { buildNucleiTargets } from "./targets.js";
 import { runNuclei } from "./nuclei.js";
 import { runTestssl } from "./testssl.js";
 import { runNikto } from "./nikto.js";
@@ -65,9 +67,16 @@ export async function runScan(ctx: RunContext, recon: ReconResult): Promise<Scan
 
   const artifacts: ScanArtifact[] = [];
 
-  // nuclei over all URLs (one aggregate artifact).
-  ctx.bus.stageProgress("scan", `nuclei over ${urls.length} URL(s)`, true);
-  const nucleiArtifact = await runNuclei(ctx, urls);
+  // nuclei: feed a REDUCED, deduped set (base URLs + unique query-stripped paths),
+  // NOT every crawled param URL. This is the lever that lets nuclei FINISH instead
+  // of being SIGTERM-killed at its timeout.
+  const nucleiTargets = buildNucleiTargets(urls, recon.endpoints, LIMITS.nuclei.maxTargets);
+  ctx.bus.stageProgress(
+    "scan",
+    `nuclei over ${nucleiTargets.length} base/unique-path target(s) (from ${recon.endpoints.length} endpoints)`,
+    true,
+  );
+  const nucleiArtifact = await runNuclei(ctx, nucleiTargets);
   if (nucleiArtifact) artifacts.push(nucleiArtifact);
 
   // nikto per URL.

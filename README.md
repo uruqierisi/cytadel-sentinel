@@ -22,14 +22,20 @@ recon → scan → normalize → import(DefectDojo) → report
   context (`naabu`). Discovered URLs are **sanitized before the scope gate**
   (drop archive garbage that embeds an external host/scheme, normalize malformed
   `host:/path`, dedupe) and **capped per host** (`SENTINEL_MAX_ENDPOINTS_PER_HOST`,
-  default 300) so one noisy source can't explode the scan. Every asset then
-  passes the scope gate before it is kept.
+  default 300) so one noisy source can't explode the scan. JS/static assets are
+  capped in a **separate bucket** (`SENTINEL_MAX_JS_ASSETS_PER_HOST`) so the
+  endpoint cap never starves retire.js. Every asset then passes the scope gate.
 - **Scan** — `nuclei` (cve/misconfig/exposure/tech), `testssl.sh` (TLS),
   `retire.js` (outdated JS), `nikto` (server checks). **Authenticated scanning**
   injects the session cookie/header so testing goes past login. Each tool has a
   configurable hard timeout and **partial capture**: if a tool is killed at its
   timeout, whatever it already wrote (e.g. nuclei's incremental `nuclei.jsonl`)
-  is still parsed — valid findings are never discarded.
+  is still parsed — valid findings are never discarded. nuclei is fed a
+  **reduced** target set (base URLs + unique query-stripped paths, not every
+  param URL) so it finishes rather than timing out, and its output file is
+  **merged with captured stdout** so a SIGTERM keeps every emitted line, not just
+  the flushed ones. nikto self-terminates gracefully via `-maxtime` so it writes
+  valid XML instead of being killed.
 - **Active injection (opt-in, destructive)** — `dalfox` (XSS) and `sqlmap` (SQLi)
   run **only** when the destructive gate is open (`allow_destructive: true` in
   scope **and** `--allow-destructive`), against in-scope discovered param URLs.

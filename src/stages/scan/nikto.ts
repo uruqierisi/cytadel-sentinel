@@ -29,10 +29,28 @@ export async function runNikto(ctx: RunContext, urls: string[]): Promise<ScanArt
   let done = 0;
   const hb = startHeartbeat(ctx, "scan", "nikto", { total: urls.length, getDone: () => done });
   try {
+  // nikto stops gracefully at -maxtime and WRITES its XML, so it self-terminates
+  // instead of being SIGTERM-killed (which left a 0-byte file). Keep -maxtime a
+  // buffer below the hard exec timeout, which remains only as a backstop.
+  const maxTimeSec = Math.max(60, Math.floor(LIMITS.toolTimeoutMs.nikto / 1000) - 30);
+
   for (const url of urls) {
     const safeName = url.replace(/[^a-z0-9.-]+/gi, "_").slice(0, 80);
     const outPath = path.join(rawDir(ctx.runId), `nikto-${safeName}.xml`);
-    const args = [...tool.baseArgs, "-h", url, "-Format", "xml", "-output", outPath, "-nointeractive", "-ask", "no"];
+    const args = [
+      ...tool.baseArgs,
+      "-h",
+      url,
+      "-Format",
+      "xml",
+      "-output",
+      outPath,
+      "-maxtime",
+      String(maxTimeSec),
+      "-nointeractive",
+      "-ask",
+      "no",
+    ];
     // Inject session cookie where nikto supports it (-id user:pass is unrelated;
     // custom headers via -H). Cookie header is the common authenticated case.
     const cookie = ctx.auth.headerMap["Cookie"];
@@ -58,9 +76,13 @@ export async function runNikto(ctx: RunContext, urls: string[]): Promise<ScanArt
       // kill the file is often 0 bytes — skip it rather than crash the pipeline.
       if (await fileHasContent(outPath)) {
         artifacts.push({ tool: "nikto", dojoScanType: "Nikto Scan", filePath: outPath, format: "xml", target: url });
-        if (res.timedOut) ctx.log.warn({ url, outPath }, "scan: nikto PARTIAL (timed out) — keeping XML");
+        if (res.timedOut) ctx.log.warn({ url, outPath }, "scan: nikto PARTIAL (hard timeout) — keeping XML");
       } else if (res.timedOut) {
-        ctx.log.warn({ url }, "scan: nikto timed out with no XML written — skipping host");
+        // Hard exec timeout beat -maxtime — nikto was killed before writing.
+        ctx.log.warn({ url, maxTimeSec }, "scan: nikto hard-timed out with no XML — raise SENTINEL_NIKTO_TIMEOUT_MS");
+      } else {
+        // Completed (or hit -maxtime) but wrote no XML: a genuine no-findings/empty run.
+        ctx.log.info({ url }, "scan: nikto completed with no XML output (no findings)");
       }
     } catch (err) {
       ctx.log.error({ err, url }, "scan: nikto failed for url");

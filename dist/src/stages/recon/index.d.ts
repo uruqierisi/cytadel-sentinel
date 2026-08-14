@@ -15,6 +15,8 @@ export interface ReconResult {
     jsUrls: string[];
     /** In-scope URLs carrying query params — fed to active-injection tools (gated). */
     paramUrls: string[];
+    /** In-scope non-JS endpoints (capped) — reduced to base/unique paths for nuclei. */
+    endpoints: string[];
     /** Count of every asset persisted this run. */
     assetCount: number;
 }
