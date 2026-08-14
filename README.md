@@ -19,10 +19,22 @@ recon → scan → normalize → import(DefectDojo) → report
 
 - **Recon** — passive subdomain discovery (`subfinder`), liveness + fingerprint
   (`httpx`), URL/endpoint discovery (`katana`, `gau`, `waybackurls`), light port
-  context (`naabu`). Every discovered asset passes the scope gate before it is kept.
-- **Scan** — `nuclei` (cve/misconfig/exposure), `testssl.sh` (TLS), `retire.js`
-  (outdated JS), `nikto` (server checks). **Authenticated scanning** injects the
-  session cookie/header so testing goes past login.
+  context (`naabu`). Discovered URLs are **sanitized before the scope gate**
+  (drop archive garbage that embeds an external host/scheme, normalize malformed
+  `host:/path`, dedupe) and **capped per host** (`SENTINEL_MAX_ENDPOINTS_PER_HOST`,
+  default 300) so one noisy source can't explode the scan. Every asset then
+  passes the scope gate before it is kept.
+- **Scan** — `nuclei` (cve/misconfig/exposure/tech), `testssl.sh` (TLS),
+  `retire.js` (outdated JS), `nikto` (server checks). **Authenticated scanning**
+  injects the session cookie/header so testing goes past login. Each tool has a
+  configurable hard timeout and **partial capture**: if a tool is killed at its
+  timeout, whatever it already wrote (e.g. nuclei's incremental `nuclei.jsonl`)
+  is still parsed — valid findings are never discarded.
+- **Active injection (opt-in, destructive)** — `dalfox` (XSS) and `sqlmap` (SQLi)
+  run **only** when the destructive gate is open (`allow_destructive: true` in
+  scope **and** `--allow-destructive`), against in-scope discovered param URLs.
+  When the gate is closed (default) they are skipped silently and the report says
+  active injection was not performed.
 - **Normalize** — every tool's raw output → one unified finding schema, deduped
   by `tool + template-id + host + matched-location`.
 - **DefectDojo** — findings are imported via DefectDojo's native `import-scan`
@@ -78,7 +90,8 @@ exits non-zero if a *required* tool failed. Re-run it any time.
 
 Installed/verified: Go, `libpcap-dev`, `subfinder`, `httpx`, `naabu`, `nuclei`
 (+ templates), `katana`, `gau`, `waybackurls`, `nikto`, `testssl.sh`,
-`retire.js`, `wpscan` (optional), Redis (Docker), and DefectDojo (Docker).
+`retire.js`, `dalfox` + `sqlmap` (active injection, gated), `wpscan` (optional),
+Redis (Docker), and DefectDojo (Docker).
 
 ### Getting the DefectDojo API key
 
@@ -163,6 +176,12 @@ short result, and a color-coded severity summary with a clickable report link.
   JSON log lines instead, for CI and piping.
 - **`--verbose`** → per-host / debug detail under each stage.
 - **`SENTINEL_UI=pretty|json`** forces a mode; `auto` (default) decides by TTY/CI.
+
+Long-running tools emit a heartbeat every `SENTINEL_PROGRESS_INTERVAL_MS` (default
+60s): the pretty spinner shows e.g. `Scan — nuclei · 4m elapsed · 3/12`, and in
+CI/JSON mode the same appears as `tool progress` log lines. Each tool has a
+configurable hard timeout (`SENTINEL_<TOOL>_TIMEOUT_MS`), so nuclei no longer runs
+a silent 30-minute internal timeout.
 
 Two separate channels, never mixed:
 

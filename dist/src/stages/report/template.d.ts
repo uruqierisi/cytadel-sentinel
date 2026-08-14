@@ -29,6 +29,8 @@ export interface ReportData {
     startedAt: string;
     finishedAt: string;
     assetCount: number;
+    /** Whether active injection (dalfox/sqlmap) ran (destructive gate open). */
+    activeInjection: boolean;
     engagementId: number | null;
     defectDojoUrl: string | null;
     severityCounts: Record<Severity, number>;

@@ -13,6 +13,8 @@ export interface ReconResult {
     webTargets: HttpxResult[];
     /** In-scope JS asset URLs — fed to retire.js. */
     jsUrls: string[];
+    /** In-scope URLs carrying query params — fed to active-injection tools (gated). */
+    paramUrls: string[];
     /** Count of every asset persisted this run. */
     assetCount: number;
 }

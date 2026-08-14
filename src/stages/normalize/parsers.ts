@@ -73,6 +73,39 @@ export function parseRetire(content: string): UnifiedFinding[] {
   return out;
 }
 
+// ------------------------------------------------- generic (dalfox/sqlmap) ---
+/**
+ * Parse the DefectDojo "Generic Findings Import" JSON that the active-injection
+ * tools emit (see stages/scan/generic.ts). The same file feeds both DefectDojo
+ * and this parser, so the shape is the shared contract.
+ */
+export function parseGeneric(content: string, fallbackTool: string): UnifiedFinding[] {
+  let doc: any;
+  try {
+    doc = JSON.parse(content);
+  } catch {
+    return [];
+  }
+  const items: any[] = Array.isArray(doc?.findings) ? doc.findings : [];
+  return items.map((f) => {
+    const endpoint = String(
+      (Array.isArray(f?.endpoints) ? f.endpoints[0] : undefined) ?? f?.file_path ?? "",
+    );
+    return {
+      sourceTool: String(f?.sentinel_tool ?? fallbackTool),
+      templateId: f?.unique_id_from_tool ? String(f.unique_id_from_tool) : null,
+      name: String(f?.title ?? "injection finding"),
+      target: endpoint,
+      matchedLocation: endpoint || null,
+      severity: normalizeSeverity(String(f?.severity ?? "high")),
+      cvss: null,
+      epss: null,
+      evidence: (f?.sentinel_evidence as string) || (f?.description as string) || null,
+      raw: f,
+    };
+  });
+}
+
 // -------------------------------------------------------------- testssl ------
 export function parseTestssl(content: string): UnifiedFinding[] {
   const rows = parseCsv(content);

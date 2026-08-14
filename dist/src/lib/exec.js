@@ -53,6 +53,13 @@ export function run(file, args = [], opts = {}) {
                 resolve(result);
                 return;
             }
+            if (error && timedOut && opts.tolerateTimeout) {
+                // Killed at the timeout — return whatever was captured. The caller
+                // reads the partial output rather than discarding valid findings.
+                logger.warn({ file, argc: args.length, durationMs }, "exec timed out — returning PARTIAL result (not discarded)");
+                resolve(result);
+                return;
+            }
             if (error) {
                 const err = error;
                 err.result = result;

@@ -26,6 +26,12 @@ export interface ExecOptions {
   input?: string;
   /** If true, a non-zero exit code does NOT reject (many scanners exit 1 on "findings"). */
   allowNonZeroExit?: boolean;
+  /**
+   * If true, a timeout/SIGTERM kill resolves with the PARTIAL result (whatever
+   * stdout/stderr was captured) instead of rejecting. Use for long scanners that
+   * stream valid findings incrementally — a kill must not discard them.
+   */
+  tolerateTimeout?: boolean;
 }
 
 export interface ExecResult {
@@ -105,6 +111,17 @@ export function run(file: string, args: string[] = [], opts: ExecOptions = {}): 
 
         if (error && !timedOut && opts.allowNonZeroExit && typeof code === "number") {
           // Non-zero exit that the caller expects (scanner "found something").
+          resolve(result);
+          return;
+        }
+
+        if (error && timedOut && opts.tolerateTimeout) {
+          // Killed at the timeout — return whatever was captured. The caller
+          // reads the partial output rather than discarding valid findings.
+          logger.warn(
+            { file, argc: args.length, durationMs },
+            "exec timed out — returning PARTIAL result (not discarded)",
+          );
           resolve(result);
           return;
         }

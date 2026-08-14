@@ -4,6 +4,9 @@ import { run, toolExists } from "../../lib/exec.js";
 import { httpRequest } from "../../lib/http.js";
 import { audit } from "../../lib/audit.js";
 import { rawDir, jsDir } from "../../lib/paths.js";
+import { fileHasContent } from "../../lib/files.js";
+import { LIMITS } from "../../config/limits.js";
+import { startHeartbeat } from "../../lib/progress.js";
 import { gate } from "../../core/context.js";
 /**
  * retire.js — outdated/vulnerable JS libraries.
@@ -50,14 +53,25 @@ export async function runRetire(ctx, jsUrls) {
         scopeHash: ctx.scopeHash,
         detail: { tool: "retirejs", stage: "scan", downloaded },
     });
+    const hb = startHeartbeat(ctx, "scan", "retire.js", { total: downloaded });
+    let timedOut = false;
     try {
-        await run("retire", ["--path", dir, "--outputformat", "json", "--outputpath", outPath, "--exitwith", "0"], { allowNonZeroExit: true, timeoutMs: 5 * 60 * 1000 });
-        ctx.log.info({ outPath, downloaded }, "scan: retire.js complete");
-        return { tool: "retirejs", dojoScanType: "Retire.js Scan", filePath: outPath, format: "json", target: "aggregate" };
+        const res = await run("retire", ["--path", dir, "--outputformat", "json", "--outputpath", outPath, "--exitwith", "0"], { allowNonZeroExit: true, tolerateTimeout: true, timeoutMs: LIMITS.toolTimeoutMs.retire });
+        timedOut = res.timedOut;
     }
     catch (err) {
-        ctx.log.error({ err }, "scan: retire.js failed");
+        ctx.log.error({ err }, "scan: retire.js errored — attempting partial capture");
+    }
+    finally {
+        hb.stop();
+    }
+    if (!(await fileHasContent(outPath))) {
+        ctx.log.warn({ outPath }, "scan: retire.js produced no output");
         return null;
     }
+    if (timedOut)
+        ctx.log.warn({ outPath }, "scan: retire.js PARTIAL (timed out) — keeping output");
+    ctx.log.info({ outPath, downloaded }, "scan: retire.js complete");
+    return { tool: "retirejs", dojoScanType: "Retire.js Scan", filePath: outPath, format: "json", target: "aggregate" };
 }
 //# sourceMappingURL=retire.js.map

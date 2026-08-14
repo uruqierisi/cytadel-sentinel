@@ -1,0 +1,4 @@
+{"template-id":"waf-detect","info":{"name":"WAF Detection","severity":"info"},"host":"http://testasp.vulnweb.com","matched-at":"http://testasp.vulnweb.com","matcher-name":"generic"}
+{"template-id":"tech-detect","info":{"name":"Technology Detection","severity":"info"},"host":"http://testasp.vulnweb.com","matched-at":"http://testasp.vulnweb.com","matcher-name":"microsoft-iis"}
+{"template-id":"microsoft-iis-version","info":{"name":"Microsoft IIS Version","severity":"info","classification":{"cvss-score":0}},"host":"http://testasp.vulnweb.com","matched-at":"http://testasp.vulnweb.com/","extracted-results":["Microsoft-IIS/8.5"]}
+{"template-id":"microsoft-iis-version","info":{"name":"Microsoft IIS Ver

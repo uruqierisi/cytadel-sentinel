@@ -49,6 +49,12 @@ export interface Reporter {
 export function createReporter(bus: RunBus, options: ReporterOptions): Reporter {
   let spinner: Ora | null = null;
   let activeTitle = "";
+  let statusText = "";
+
+  /** Apply the current transient status (scope summary / tool heartbeat) to the spinner. */
+  const applyStatus = (): void => {
+    if (spinner) spinner.text = statusText ? `${activeTitle} ${pc.dim(`— ${statusText}`)}` : activeTitle;
+  };
 
   /** Print a line without clobbering the live spinner. */
   const printLine = (line: string): void => {
@@ -75,13 +81,21 @@ export function createReporter(bus: RunBus, options: ReporterOptions): Reporter 
 
   bus.onStageStart(({ stage, title }) => {
     activeTitle = title || STAGE_LABEL[stage];
+    statusText = "";
     // Keep the spinner on stdout so header/stages/summary form one stream.
     spinner = ora({ text: activeTitle, indent: 2, color: "cyan", stream: process.stdout }).start();
   });
 
   // Collapse the SCOPE_ACCEPT spam into a single "N/M in scope" line.
   bus.onScopeSummary(({ accepted, total }) => {
-    if (spinner) spinner.text = `${activeTitle} ${pc.dim(`— ${accepted}/${total} in scope`)}`;
+    statusText = `${accepted}/${total} in scope`;
+    applyStatus();
+  });
+
+  // Live tool heartbeat, e.g. "nuclei · 4m elapsed" — updates the spinner in place.
+  bus.onStageStatus(({ text }) => {
+    statusText = text;
+    applyStatus();
   });
 
   bus.onStageProgress(({ message, detail }) => {

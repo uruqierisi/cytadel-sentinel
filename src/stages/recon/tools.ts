@@ -1,6 +1,8 @@
 import { run, toolExists } from "../../lib/exec.js";
 import { parseLines, parseJsonl } from "../../lib/parse.js";
 import { audit } from "../../lib/audit.js";
+import { LIMITS } from "../../config/limits.js";
+import { startHeartbeat } from "../../lib/progress.js";
 import type { RunContext } from "../../core/context.js";
 
 /**
@@ -36,15 +38,18 @@ async function logExec(ctx: RunContext, tool: string, target: string): Promise<v
 export async function subfinder(ctx: RunContext, domain: string): Promise<string[]> {
   if (!(await ensure(ctx, "subfinder"))) return [];
   await logExec(ctx, "subfinder", domain);
+  const hb = startHeartbeat(ctx, "recon", "subfinder", { total: 1 });
   try {
     const { stdout } = await run("subfinder", ["-d", domain, "-silent"], {
       allowNonZeroExit: true,
-      timeoutMs: 5 * 60 * 1000,
+      timeoutMs: LIMITS.toolTimeoutMs.subfinder,
     });
     return parseLines(stdout);
   } catch (err) {
     ctx.log.error({ err, domain }, "subfinder failed");
     return [];
+  } finally {
+    hb.stop();
   }
 }
 
@@ -81,11 +86,12 @@ export async function httpx(ctx: RunContext, hosts: string[]): Promise<HttpxResu
     args.push("-H", line);
   }
 
+  const hb = startHeartbeat(ctx, "recon", "httpx", { total: hosts.length });
   try {
     const { stdout } = await run("httpx", args, {
       input: hosts.join("\n") + "\n",
       allowNonZeroExit: true,
-      timeoutMs: 10 * 60 * 1000,
+      timeoutMs: LIMITS.toolTimeoutMs.httpx,
     });
     return parseJsonl<Record<string, unknown>>(stdout).map((r) => ({
       host: String(r["input"] ?? r["host"] ?? ""),
@@ -98,6 +104,8 @@ export async function httpx(ctx: RunContext, hosts: string[]): Promise<HttpxResu
   } catch (err) {
     ctx.log.error({ err }, "httpx failed");
     return [];
+  } finally {
+    hb.stop();
   }
 }
 
@@ -109,12 +117,18 @@ export async function katana(ctx: RunContext, url: string): Promise<string[]> {
   for (const line of ctx.auth.headerLines) {
     args.push("-H", line);
   }
+  const hb = startHeartbeat(ctx, "recon", "katana", { total: 1 });
   try {
-    const { stdout } = await run("katana", args, { allowNonZeroExit: true, timeoutMs: 5 * 60 * 1000 });
+    const { stdout } = await run("katana", args, {
+      allowNonZeroExit: true,
+      timeoutMs: LIMITS.toolTimeoutMs.katana,
+    });
     return parseLines(stdout);
   } catch (err) {
     ctx.log.error({ err, url }, "katana failed");
     return [];
+  } finally {
+    hb.stop();
   }
 }
 
@@ -122,15 +136,18 @@ export async function katana(ctx: RunContext, url: string): Promise<string[]> {
 export async function gau(ctx: RunContext, domain: string): Promise<string[]> {
   if (!(await ensure(ctx, "gau", ["--version"]))) return [];
   await logExec(ctx, "gau", domain);
+  const hb = startHeartbeat(ctx, "recon", "gau", { total: 1 });
   try {
     const { stdout } = await run("gau", ["--subs", domain], {
       allowNonZeroExit: true,
-      timeoutMs: 3 * 60 * 1000,
+      timeoutMs: LIMITS.toolTimeoutMs.gau,
     });
     return parseLines(stdout);
   } catch (err) {
     ctx.log.error({ err, domain }, "gau failed");
     return [];
+  } finally {
+    hb.stop();
   }
 }
 
@@ -138,15 +155,18 @@ export async function gau(ctx: RunContext, domain: string): Promise<string[]> {
 export async function waybackurls(ctx: RunContext, domain: string): Promise<string[]> {
   if (!(await ensure(ctx, "waybackurls", ["-h"]))) return [];
   await logExec(ctx, "waybackurls", domain);
+  const hb = startHeartbeat(ctx, "recon", "waybackurls", { total: 1 });
   try {
     const { stdout } = await run("waybackurls", [domain], {
       allowNonZeroExit: true,
-      timeoutMs: 3 * 60 * 1000,
+      timeoutMs: LIMITS.toolTimeoutMs.waybackurls,
     });
     return parseLines(stdout);
   } catch (err) {
     ctx.log.error({ err, domain }, "waybackurls failed");
     return [];
+  } finally {
+    hb.stop();
   }
 }
 
@@ -158,7 +178,7 @@ export async function naabu(ctx: RunContext, host: string): Promise<number[]> {
     const { stdout } = await run(
       "naabu",
       ["-host", host, "-top-ports", "100", "-silent", "-no-color"],
-      { allowNonZeroExit: true, timeoutMs: 5 * 60 * 1000 },
+      { allowNonZeroExit: true, timeoutMs: LIMITS.toolTimeoutMs.naabu },
     );
     // Output lines are "host:port".
     const ports = new Set<number>();

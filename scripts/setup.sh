@@ -206,6 +206,42 @@ install_wpscan() { # optional
 }
 
 # =============================================================================
+# Active-injection tools (only run behind the destructive gate at scan time)
+# =============================================================================
+install_dalfox() {
+  # dalfox (XSS) via go install.
+  if have dalfox; then record "dalfox" "OK" "$(dalfox version 2>&1 | head -1 || echo present)"; return 0; fi
+  if ! have go; then record "dalfox" "FAIL" "go missing — cannot 'go install dalfox'"; return 1; fi
+  log "Installing dalfox via go install ..."
+  if GOBIN="$GOBIN" go install github.com/hahwul/dalfox/v2@latest >/tmp/go_install_dalfox.log 2>&1 && have dalfox; then
+    record "dalfox" "INSTALLED" "$(dalfox version 2>&1 | head -1 || echo installed)"
+  else
+    record "dalfox" "FAIL" "go install dalfox failed — see /tmp/go_install_dalfox.log"
+  fi
+}
+
+install_sqlmap() {
+  # sqlmap (SQLi) — PATH, or git clone into tools/sqlmap (python).
+  if have sqlmap; then record "sqlmap" "OK" "$(sqlmap --version 2>/dev/null | head -1 || echo present)"; return 0; fi
+  if [ -f "$TOOLS_DIR/sqlmap/sqlmap.py" ]; then
+    log "Updating sqlmap checkout ..."
+    ( cd "$TOOLS_DIR/sqlmap" && git pull --ff-only >/dev/null 2>&1 ) || true
+    record "sqlmap" "OK" "tools/sqlmap (python tools/sqlmap/sqlmap.py)"
+    return 0
+  fi
+  log "Cloning sqlmap ..."
+  if git clone --depth 1 https://github.com/sqlmapproject/sqlmap "$TOOLS_DIR/sqlmap" >/dev/null 2>&1; then
+    if have python3 || have python; then
+      record "sqlmap" "INSTALLED" "git -> tools/sqlmap (python)"
+    else
+      record "sqlmap" "FAIL" "cloned but no python found — install python3"
+    fi
+  else
+    record "sqlmap" "FAIL" "git clone failed"
+  fi
+}
+
+# =============================================================================
 # Redis + DefectDojo (Docker)
 # =============================================================================
 ensure_redis() {
@@ -321,6 +357,8 @@ main() {
   install_testssl
   install_retirejs
   install_wpscan
+  install_dalfox
+  install_sqlmap
   ensure_redis
   bring_up_defectdojo
 

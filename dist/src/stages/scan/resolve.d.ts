@@ -9,3 +9,7 @@ export interface ResolvedTool {
 }
 export declare function resolveNikto(): Promise<ResolvedTool | null>;
 export declare function resolveTestssl(): Promise<ResolvedTool | null>;
+/** dalfox (XSS) — active injection, destructive gate only. Installed via `go install`. */
+export declare function resolveDalfox(): Promise<ResolvedTool | null>;
+/** sqlmap (SQLi) — active injection, destructive gate only. PATH or tools/sqlmap checkout. */
+export declare function resolveSqlmap(): Promise<ResolvedTool | null>;

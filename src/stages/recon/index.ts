@@ -1,7 +1,10 @@
 import { prisma } from "../../db/client.js";
 import { audit } from "../../lib/audit.js";
 import { gate, gateMany, type RunContext } from "../../core/context.js";
+import { evaluateScope } from "../../config/inScope.js";
+import { LIMITS } from "../../config/limits.js";
 import { subfinder, httpx, katana, gau, waybackurls, naabu, type HttpxResult } from "./tools.js";
+import { sanitizeDiscoveredUrls, capEndpointsPerHost } from "./sanitize.js";
 
 /**
  * Recon stage.
@@ -17,11 +20,14 @@ export interface ReconResult {
   webTargets: HttpxResult[];
   /** In-scope JS asset URLs — fed to retire.js. */
   jsUrls: string[];
+  /** In-scope URLs carrying query params — fed to active-injection tools (gated). */
+  paramUrls: string[];
   /** Count of every asset persisted this run. */
   assetCount: number;
 }
 
 const JS_URL = /\.js(\?|$)/i;
+const HAS_PARAM = /\?[^#]*=[^#]*/;
 
 /** Seed apex/base domains and seed hosts from the scope. */
 function seedTargets(ctx: RunContext): { domains: string[]; hosts: string[] } {
@@ -127,20 +133,50 @@ export async function runRecon(ctx: RunContext): Promise<ReconResult> {
   }
 
   // 5) URL/endpoint + JS discovery over alive web targets.
-  const urlSet = new Set<string>();
-  const jsSet = new Set<string>();
+  const rawFound: string[] = [];
   for (const t of webTargets) {
-    const found = [
-      ...(await katana(ctx, t.url)),
-      ...(await gau(ctx, t.host)),
-      ...(await waybackurls(ctx, t.host)),
-    ];
-    for (const u of found) {
-      const decision = await gate(ctx, u);
-      if (!decision.allowed) continue;
-      urlSet.add(u);
-      if (JS_URL.test(u)) jsSet.add(u);
-    }
+    rawFound.push(...(await katana(ctx, t.url)));
+    rawFound.push(...(await gau(ctx, t.host)));
+    rawFound.push(...(await waybackurls(ctx, t.host)));
+  }
+
+  // 5a) SANITIZE before the scope gate: drop mangled external URLs (embedded
+  // scheme / bare external host in path), normalize "host:/path", dedupe. This
+  // stops garbage archive entries from masquerading as in-scope assets.
+  const isInScopeHost = (host: string) => evaluateScope(ctx.scope, host).allowed;
+  const { urls: cleaned, stats } = sanitizeDiscoveredUrls(rawFound, isInScopeHost);
+  ctx.log.info({ ...stats }, "recon: url sanitize");
+  ctx.bus.stageProgress(
+    "recon",
+    `sanitized URLs: ${stats.kept} kept · ${stats.droppedExternalHost} external · ` +
+      `${stats.droppedEmbeddedScheme} embedded-scheme · ${stats.duplicates} dup (of ${stats.total})`,
+    true,
+  );
+
+  // 5b) Scope gate (semantics + audit unchanged) on the cleaned URLs.
+  const gated: string[] = [];
+  for (const u of cleaned) {
+    const decision = await gate(ctx, u);
+    if (decision.allowed) gated.push(u);
+  }
+
+  // 5c) Cap endpoints per host so one noisy source can't explode the scan.
+  const { kept: cappedUrls, truncated } = capEndpointsPerHost(gated, LIMITS.maxEndpointsPerHost);
+  for (const [host, dropped] of truncated) {
+    ctx.log.warn({ host, dropped, cap: LIMITS.maxEndpointsPerHost }, "recon: endpoint cap reached");
+    ctx.bus.stageProgress(
+      "recon",
+      `capped ${host} at ${LIMITS.maxEndpointsPerHost} endpoints (+${dropped} dropped)`,
+      false,
+    );
+  }
+
+  const urlSet = new Set<string>(cappedUrls);
+  const jsSet = new Set<string>();
+  const paramSet = new Set<string>();
+  for (const u of cappedUrls) {
+    if (JS_URL.test(u)) jsSet.add(u);
+    if (HAS_PARAM.test(u)) paramSet.add(u);
   }
 
   for (const u of urlSet) await persistSimple(ctx, "ENDPOINT", u);
@@ -158,5 +194,5 @@ export async function runRecon(ctx: RunContext): Promise<ReconResult> {
     detail: { stage: "recon", assetCount, webTargets: webTargets.length },
   });
 
-  return { webTargets, jsUrls: [...jsSet], assetCount };
+  return { webTargets, jsUrls: [...jsSet], paramUrls: [...paramSet], assetCount };
 }

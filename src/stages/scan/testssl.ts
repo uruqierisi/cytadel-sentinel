@@ -2,6 +2,9 @@ import path from "node:path";
 import { run } from "../../lib/exec.js";
 import { audit } from "../../lib/audit.js";
 import { rawDir } from "../../lib/paths.js";
+import { fileHasContent } from "../../lib/files.js";
+import { LIMITS } from "../../config/limits.js";
+import { startHeartbeat } from "../../lib/progress.js";
 import { resolveTestssl } from "./resolve.js";
 import type { RunContext } from "../../core/context.js";
 import type { ScanArtifact } from "./artifacts.js";
@@ -21,6 +24,9 @@ export async function runTestssl(ctx: RunContext, hostports: string[]): Promise<
   }
 
   const artifacts: ScanArtifact[] = [];
+  let done = 0;
+  const hb = startHeartbeat(ctx, "scan", "testssl", { total: hostports.length, getDone: () => done });
+  try {
   for (const hp of hostports) {
     const safeName = hp.replace(/[^a-z0-9.-]+/gi, "_");
     const outPath = path.join(rawDir(ctx.runId), `testssl-${safeName}.csv`);
@@ -33,15 +39,24 @@ export async function runTestssl(ctx: RunContext, hostports: string[]): Promise<
       detail: { tool: "testssl", stage: "scan" },
     });
     try {
-      await run(
+      const res = await run(
         tool.file,
         [...tool.baseArgs, "--csvfile", outPath, "--quiet", "--color", "0", "--warnings", "off", hp],
-        { allowNonZeroExit: true, timeoutMs: 10 * 60 * 1000 },
+        { allowNonZeroExit: true, tolerateTimeout: true, timeoutMs: LIMITS.toolTimeoutMs.testssl },
       );
-      artifacts.push({ tool: "testssl", dojoScanType: "Testssl Scan", filePath: outPath, format: "csv", target: hp });
+      if (await fileHasContent(outPath)) {
+        artifacts.push({ tool: "testssl", dojoScanType: "Testssl Scan", filePath: outPath, format: "csv", target: hp });
+        if (res.timedOut) ctx.log.warn({ hp, outPath }, "scan: testssl PARTIAL (timed out) — keeping CSV");
+      } else if (res.timedOut) {
+        ctx.log.warn({ hp }, "scan: testssl timed out with no CSV — skipping host");
+      }
     } catch (err) {
       ctx.log.error({ err, hp }, "scan: testssl failed for host");
     }
+    done++;
+  }
+  } finally {
+    hb.stop();
   }
   ctx.log.info({ hosts: hostports.length, artifacts: artifacts.length }, "scan: testssl complete");
   return artifacts;

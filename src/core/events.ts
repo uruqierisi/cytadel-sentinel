@@ -27,6 +27,11 @@ export interface StageProgressPayload {
   /** Detail lines only shown under --verbose. */
   detail: boolean;
 }
+export interface StageStatusPayload {
+  stage: StageId;
+  /** Transient status shown on the live spinner (e.g. "nuclei · 4m elapsed"). */
+  text: string;
+}
 export interface StageDonePayload {
   stage: StageId;
   summary: string;
@@ -62,6 +67,9 @@ export class RunBus extends EventEmitter {
   stageProgress(stage: StageId, message: string, detail = false): void {
     this.emit("stage:progress", { stage, message, detail });
   }
+  stageStatus(stage: StageId, text: string): void {
+    this.emit("stage:status", { stage, text });
+  }
   stageDone(stage: StageId, summary: string): void {
     this.emit("stage:done", { stage, summary });
   }
@@ -84,6 +92,9 @@ export class RunBus extends EventEmitter {
   }
   onStageProgress(cb: (p: StageProgressPayload) => void): void {
     this.on("stage:progress", cb as (...a: unknown[]) => void);
+  }
+  onStageStatus(cb: (p: StageStatusPayload) => void): void {
+    this.on("stage:status", cb as (...a: unknown[]) => void);
   }
   onStageDone(cb: (p: StageDonePayload) => void): void {
     this.on("stage:done", cb as (...a: unknown[]) => void);

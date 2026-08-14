@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { prisma } from "../../db/client.js";
 import { audit } from "../../lib/audit.js";
 import { dedupeKey } from "./types.js";
-import { parseNuclei, parseNikto, parseTestssl, parseRetire } from "./parsers.js";
+import { parseNuclei, parseNikto, parseTestssl, parseRetire, parseGeneric } from "./parsers.js";
 const DESTRUCTIVE_HINT = /(sqli|sql-injection|rce|command-injection|deserialization)/i;
 async function parseArtifact(artifact) {
     let content;
@@ -21,6 +21,9 @@ async function parseArtifact(artifact) {
             return parseNikto(content);
         case "retirejs":
             return parseRetire(content);
+        case "dalfox":
+        case "sqlmap":
+            return parseGeneric(content, artifact.tool);
         default:
             return [];
     }

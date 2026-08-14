@@ -76,6 +76,7 @@ export async function runReport(ctx, engagementId) {
         startedAt: run.startedAt.toISOString(),
         finishedAt: (run.finishedAt ?? new Date()).toISOString(),
         assetCount,
+        activeInjection: ctx.allowDestructive,
         engagementId,
         defectDojoUrl: process.env.DEFECTDOJO_URL?.replace(/\/+$/, "") ?? null,
         severityCounts,

@@ -5,7 +5,7 @@ import type { RunContext } from "../../core/context.js";
 import type { ScanResult } from "../scan/index.js";
 import type { ScanArtifact } from "../scan/artifacts.js";
 import { dedupeKey, type UnifiedFinding } from "./types.js";
-import { parseNuclei, parseNikto, parseTestssl, parseRetire } from "./parsers.js";
+import { parseNuclei, parseNikto, parseTestssl, parseRetire, parseGeneric } from "./parsers.js";
 
 /**
  * Normalize stage: read each native scan artifact, map to UnifiedFinding, dedupe
@@ -37,6 +37,9 @@ async function parseArtifact(artifact: ScanArtifact): Promise<UnifiedFinding[]> 
       return parseNikto(content);
     case "retirejs":
       return parseRetire(content);
+    case "dalfox":
+    case "sqlmap":
+      return parseGeneric(content, artifact.tool);
     default:
       return [];
   }

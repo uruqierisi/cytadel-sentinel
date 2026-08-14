@@ -1,6 +1,8 @@
 import { run, toolExists } from "../../lib/exec.js";
 import { parseLines, parseJsonl } from "../../lib/parse.js";
 import { audit } from "../../lib/audit.js";
+import { LIMITS } from "../../config/limits.js";
+import { startHeartbeat } from "../../lib/progress.js";
 /**
  * Thin, defensive wrappers around each recon binary. Every wrapper:
  *   - checks the tool exists (degrades to [] + a logged skip if not),
@@ -32,16 +34,20 @@ export async function subfinder(ctx, domain) {
     if (!(await ensure(ctx, "subfinder")))
         return [];
     await logExec(ctx, "subfinder", domain);
+    const hb = startHeartbeat(ctx, "recon", "subfinder", { total: 1 });
     try {
         const { stdout } = await run("subfinder", ["-d", domain, "-silent"], {
             allowNonZeroExit: true,
-            timeoutMs: 5 * 60 * 1000,
+            timeoutMs: LIMITS.toolTimeoutMs.subfinder,
         });
         return parseLines(stdout);
     }
     catch (err) {
         ctx.log.error({ err, domain }, "subfinder failed");
         return [];
+    }
+    finally {
+        hb.stop();
     }
 }
 /**
@@ -68,11 +74,12 @@ export async function httpx(ctx, hosts) {
     for (const line of ctx.auth.headerLines) {
         args.push("-H", line);
     }
+    const hb = startHeartbeat(ctx, "recon", "httpx", { total: hosts.length });
     try {
         const { stdout } = await run("httpx", args, {
             input: hosts.join("\n") + "\n",
             allowNonZeroExit: true,
-            timeoutMs: 10 * 60 * 1000,
+            timeoutMs: LIMITS.toolTimeoutMs.httpx,
         });
         return parseJsonl(stdout).map((r) => ({
             host: String(r["input"] ?? r["host"] ?? ""),
@@ -87,6 +94,9 @@ export async function httpx(ctx, hosts) {
         ctx.log.error({ err }, "httpx failed");
         return [];
     }
+    finally {
+        hb.stop();
+    }
 }
 /** katana: active crawl of a single URL to discover endpoints. */
 export async function katana(ctx, url) {
@@ -97,13 +107,20 @@ export async function katana(ctx, url) {
     for (const line of ctx.auth.headerLines) {
         args.push("-H", line);
     }
+    const hb = startHeartbeat(ctx, "recon", "katana", { total: 1 });
     try {
-        const { stdout } = await run("katana", args, { allowNonZeroExit: true, timeoutMs: 5 * 60 * 1000 });
+        const { stdout } = await run("katana", args, {
+            allowNonZeroExit: true,
+            timeoutMs: LIMITS.toolTimeoutMs.katana,
+        });
         return parseLines(stdout);
     }
     catch (err) {
         ctx.log.error({ err, url }, "katana failed");
         return [];
+    }
+    finally {
+        hb.stop();
     }
 }
 /** gau: pull historical URLs for a domain from public sources. */
@@ -111,10 +128,11 @@ export async function gau(ctx, domain) {
     if (!(await ensure(ctx, "gau", ["--version"])))
         return [];
     await logExec(ctx, "gau", domain);
+    const hb = startHeartbeat(ctx, "recon", "gau", { total: 1 });
     try {
         const { stdout } = await run("gau", ["--subs", domain], {
             allowNonZeroExit: true,
-            timeoutMs: 3 * 60 * 1000,
+            timeoutMs: LIMITS.toolTimeoutMs.gau,
         });
         return parseLines(stdout);
     }
@@ -122,22 +140,29 @@ export async function gau(ctx, domain) {
         ctx.log.error({ err, domain }, "gau failed");
         return [];
     }
+    finally {
+        hb.stop();
+    }
 }
 /** waybackurls: historical URLs from the Wayback Machine. */
 export async function waybackurls(ctx, domain) {
     if (!(await ensure(ctx, "waybackurls", ["-h"])))
         return [];
     await logExec(ctx, "waybackurls", domain);
+    const hb = startHeartbeat(ctx, "recon", "waybackurls", { total: 1 });
     try {
         const { stdout } = await run("waybackurls", [domain], {
             allowNonZeroExit: true,
-            timeoutMs: 3 * 60 * 1000,
+            timeoutMs: LIMITS.toolTimeoutMs.waybackurls,
         });
         return parseLines(stdout);
     }
     catch (err) {
         ctx.log.error({ err, domain }, "waybackurls failed");
         return [];
+    }
+    finally {
+        hb.stop();
     }
 }
 /** naabu: light top-ports scan of one host for port context. */
@@ -146,7 +171,7 @@ export async function naabu(ctx, host) {
         return [];
     await logExec(ctx, "naabu", host);
     try {
-        const { stdout } = await run("naabu", ["-host", host, "-top-ports", "100", "-silent", "-no-color"], { allowNonZeroExit: true, timeoutMs: 5 * 60 * 1000 });
+        const { stdout } = await run("naabu", ["-host", host, "-top-ports", "100", "-silent", "-no-color"], { allowNonZeroExit: true, timeoutMs: LIMITS.toolTimeoutMs.naabu });
         // Output lines are "host:port".
         const ports = new Set();
         for (const line of parseLines(stdout)) {

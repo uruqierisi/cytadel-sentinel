@@ -5,6 +5,8 @@ import { runNuclei } from "./nuclei.js";
 import { runTestssl } from "./testssl.js";
 import { runNikto } from "./nikto.js";
 import { runRetire } from "./retire.js";
+import { runDalfox } from "./dalfox.js";
+import { runSqlmap } from "./sqlmap.js";
 /** Derive host:port for TLS testing from an alive web URL. */
 function hostPort(url) {
     try {
@@ -60,6 +62,21 @@ export async function runScan(ctx, recon) {
     const retireArtifact = await runRetire(ctx, recon.jsUrls);
     if (retireArtifact)
         artifacts.push(retireArtifact);
+    // Active injection (dalfox XSS + sqlmap SQLi) — STRICTLY behind the
+    // destructive gate. When closed (default) we skip silently; the DESTRUCTIVE_GATE
+    // audit event above already records the decision, and the report notes it.
+    if (ctx.allowDestructive) {
+        ctx.bus.stageProgress("scan", `active injection over ${recon.paramUrls.length} param URL(s)`, false);
+        const dalfoxArtifact = await runDalfox(ctx, recon.paramUrls);
+        if (dalfoxArtifact)
+            artifacts.push(dalfoxArtifact);
+        const sqlmapArtifact = await runSqlmap(ctx, recon.paramUrls);
+        if (sqlmapArtifact)
+            artifacts.push(sqlmapArtifact);
+    }
+    else {
+        ctx.log.info({ paramUrls: recon.paramUrls.length }, "scan: active injection (dalfox/sqlmap) skipped — destructive gate closed");
+    }
     ctx.log.info({ artifacts: artifacts.length }, "scan: complete");
     await audit({
         runId: ctx.runId,

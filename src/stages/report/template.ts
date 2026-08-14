@@ -32,6 +32,8 @@ export interface ReportData {
   startedAt: string;
   finishedAt: string;
   assetCount: number;
+  /** Whether active injection (dalfox/sqlmap) ran (destructive gate open). */
+  activeInjection: boolean;
   engagementId: number | null;
   defectDojoUrl: string | null;
   severityCounts: Record<Severity, number>;
@@ -170,6 +172,16 @@ export function renderHtml(d: ReportData): string {
       ? `<div class="banner">⚠ Destructive checks were ENABLED for this run (scope + CLI both authorized).</div>`
       : ""
   }
+
+  <div class="banner" style="background:${d.activeInjection ? "#0f2f1f" : "#1a2230"};border-color:${
+    d.activeInjection ? "#2f9e6b" : "#3a5170"
+  };color:${d.activeInjection ? "#c6ffe0" : "#aecbe6"}">
+    ${
+      d.activeInjection
+        ? "Active injection testing was PERFORMED: dalfox (XSS) and sqlmap (SQLi) against in-scope parameters."
+        : "Active injection testing (SQLi/XSS via sqlmap/dalfox) was NOT performed — the destructive gate was closed. Re-run with scope allow_destructive: true and --allow-destructive to include it."
+    }
+  </div>
 
   <div class="meta">
     <div><div class="k">Scope</div><div class="v">${esc(d.scope.name)}</div></div>

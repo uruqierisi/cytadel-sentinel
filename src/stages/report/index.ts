@@ -94,6 +94,7 @@ export async function runReport(ctx: RunContext, engagementId: number | null): P
     startedAt: run.startedAt.toISOString(),
     finishedAt: (run.finishedAt ?? new Date()).toISOString(),
     assetCount,
+    activeInjection: ctx.allowDestructive,
     engagementId,
     defectDojoUrl: process.env.DEFECTDOJO_URL?.replace(/\/+$/, "") ?? null,
     severityCounts,
