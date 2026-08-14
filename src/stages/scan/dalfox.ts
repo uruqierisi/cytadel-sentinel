@@ -9,6 +9,7 @@ import { parseJsonLoose } from "../../lib/parse.js";
 import { normalizeSeverity } from "../normalize/types.js";
 import { gate, type RunContext } from "../../core/context.js";
 import { resolveDalfox } from "./resolve.js";
+import { dedupeParamSignatures } from "./params.js";
 import { writeGenericFindingsFile, type GenericFinding } from "./generic.js";
 import type { ScanArtifact } from "./artifacts.js";
 
@@ -28,13 +29,17 @@ export async function runDalfox(ctx: RunContext, paramUrls: string[]): Promise<S
     return null;
   }
 
-  // Defensive re-gate; cap the number of injection targets.
+  // Dedupe by injection signature (path + param NAME), then defensively re-gate.
+  const signatures = dedupeParamSignatures(paramUrls, LIMITS.maxInjectionTargets);
   const targets: string[] = [];
-  for (const u of paramUrls) {
+  for (const u of signatures) {
     if ((await gate(ctx, u)).allowed) targets.push(u);
-    if (targets.length >= LIMITS.maxInjectionTargets) break;
   }
   if (targets.length === 0) return null;
+  ctx.log.info(
+    { rawParamUrls: paramUrls.length, dedupedSignatures: targets.length },
+    "scan: dalfox targets after signature dedupe",
+  );
 
   const args = [...tool.baseArgs, "pipe", "--format", "json", "--silence", "--no-color", "--no-spinner"];
   for (const line of ctx.auth.headerLines) {

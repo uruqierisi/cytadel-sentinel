@@ -37,9 +37,8 @@ export const LIMITS = {
     nikto: intFromEnv("SENTINEL_NIKTO_TIMEOUT_MS", 8 * MIN),
     testssl: intFromEnv("SENTINEL_TESTSSL_TIMEOUT_MS", 10 * MIN),
     retire: intFromEnv("SENTINEL_RETIRE_TIMEOUT_MS", 5 * MIN),
-    // Active injection (destructive gate only).
-    dalfox: intFromEnv("SENTINEL_DALFOX_TIMEOUT_MS", 15 * MIN),
-    sqlmap: intFromEnv("SENTINEL_SQLMAP_TIMEOUT_MS", 20 * MIN),
+    // dalfox runs as one aggregate pipe over all targets (destructive gate only).
+    dalfox: intFromEnv("SENTINEL_DALFOX_TIMEOUT_MS", 10 * MIN),
   },
 
   /** nuclei per-request tuning — caps requests so a scan can't run unbounded. */
@@ -54,8 +53,29 @@ export const LIMITS = {
     maxTargets: intFromEnv("SENTINEL_NUCLEI_MAX_TARGETS", 150),
   },
 
-  /** Max param-URLs fed to each active-injection tool (kept bounded even when gated open). */
-  maxInjectionTargets: intFromEnv("SENTINEL_MAX_INJECTION_TARGETS", 50),
+  /**
+   * Max DEDUPED param-signatures fed to each active-injection tool. Param URLs
+   * are first collapsed by (path + param NAME) — ?id=1 and ?id=2 are the same
+   * test — so this cap is on distinct injection signatures, not raw URLs.
+   */
+  maxInjectionTargets: intFromEnv("SENTINEL_MAX_INJECTION_TARGETS", 25),
+
+  /** sqlmap speed tuning. Defaults trade exhaustiveness for a practical runtime. */
+  sqlmap: {
+    level: intFromEnv("SENTINEL_SQLMAP_LEVEL", 1),
+    risk: intFromEnv("SENTINEL_SQLMAP_RISK", 1),
+    // B=boolean, E=error, U=union — the FAST techniques. Drop S (stacked) and
+    // T (time-based), which dominate sqlmap's runtime.
+    technique: process.env.SENTINEL_SQLMAP_TECHNIQUE ?? "BEU",
+    threads: intFromEnv("SENTINEL_SQLMAP_THREADS", 4),
+    /** sqlmap --timeout (per HTTP request, seconds). */
+    requestTimeoutSec: intFromEnv("SENTINEL_SQLMAP_REQ_TIMEOUT_SEC", 10),
+    retries: intFromEnv("SENTINEL_SQLMAP_RETRIES", 1),
+    /** Hard exec cap PER target (ms) — was mistakenly 20 min for every URL. */
+    targetTimeoutMs: intFromEnv("SENTINEL_SQLMAP_TARGET_TIMEOUT_MS", 90 * 1000),
+    /** Overall wall-clock budget for the whole sqlmap stage (ms). */
+    budgetMs: intFromEnv("SENTINEL_SQLMAP_BUDGET_MS", 8 * MIN),
+  },
 } as const;
 
 export type ToolName = keyof typeof LIMITS.toolTimeoutMs;

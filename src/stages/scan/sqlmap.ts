@@ -7,15 +7,22 @@ import { LIMITS } from "../../config/limits.js";
 import { startHeartbeat } from "../../lib/progress.js";
 import { gate, type RunContext } from "../../core/context.js";
 import { resolveSqlmap } from "./resolve.js";
+import { dedupeParamSignatures } from "./params.js";
 import { writeGenericFindingsFile, type GenericFinding } from "./generic.js";
 import type { ScanArtifact } from "./artifacts.js";
 
 /**
  * sqlmap — active SQL injection. DESTRUCTIVE: only invoked when the destructive
- * gate is open. Runs per in-scope param URL with --batch (non-interactive), at
- * low level/risk. Injection points are parsed from sqlmap's stdout.
+ * gate is open.
  *
- * Partial capture: a kill still yields whatever stdout was captured.
+ * Practical runtime:
+ *   - targets are deduped by (path + param NAME) so ?id=1 / ?id=2 count once,
+ *     then capped to LIMITS.maxInjectionTargets distinct signatures;
+ *   - fast flags: low level/risk, fast techniques only (BEU), threads, batch;
+ *   - a HARD per-target exec timeout (not 20 min each) plus an OVERALL wall-clock
+ *     budget that stops starting new targets once exceeded;
+ *   - partial capture: a killed target still contributes whatever injection
+ *     points were confirmed in its stdout.
  */
 export async function runSqlmap(ctx: RunContext, paramUrls: string[]): Promise<ScanArtifact | null> {
   if (paramUrls.length === 0) return null;
@@ -25,13 +32,17 @@ export async function runSqlmap(ctx: RunContext, paramUrls: string[]): Promise<S
     return null;
   }
 
-  // Defensive re-gate; cap targets.
+  // Dedupe by injection signature, then defensively re-gate.
+  const signatures = dedupeParamSignatures(paramUrls, LIMITS.maxInjectionTargets);
   const targets: string[] = [];
-  for (const u of paramUrls) {
+  for (const u of signatures) {
     if ((await gate(ctx, u)).allowed) targets.push(u);
-    if (targets.length >= LIMITS.maxInjectionTargets) break;
   }
   if (targets.length === 0) return null;
+  ctx.log.info(
+    { rawParamUrls: paramUrls.length, dedupedSignatures: targets.length },
+    "scan: sqlmap targets after signature dedupe",
+  );
 
   await audit({
     runId: ctx.runId,
@@ -41,20 +52,38 @@ export async function runSqlmap(ctx: RunContext, paramUrls: string[]): Promise<S
     detail: { tool: "sqlmap", stage: "scan", targets: targets.length, allowDestructive: true },
   });
 
+  const cfg = LIMITS.sqlmap;
   const outDir = path.join(rawDir(ctx.runId), "sqlmap");
   const findings: GenericFinding[] = [];
+  const startedAt = Date.now();
   let done = 0;
+  let budgetHit = false;
   const hb = startHeartbeat(ctx, "scan", "sqlmap", { total: targets.length, getDone: () => done });
   try {
     for (const url of targets) {
+      // Overall time budget: stop launching new targets once exceeded.
+      if (Date.now() - startedAt >= cfg.budgetMs) {
+        budgetHit = true;
+        ctx.log.warn(
+          { done, total: targets.length, budgetMs: cfg.budgetMs },
+          "scan: sqlmap overall budget reached — stopping (keeping findings so far)",
+        );
+        ctx.bus.stageProgress("scan", `sqlmap budget reached at ${done}/${targets.length} — kept findings so far`, false);
+        break;
+      }
+
       const args = [
         ...tool.baseArgs,
         "-u",
         url,
         "--batch",
         "--disable-coloring",
-        "--level=1",
-        "--risk=1",
+        `--level=${cfg.level}`,
+        `--risk=${cfg.risk}`,
+        `--technique=${cfg.technique}`,
+        `--threads=${cfg.threads}`,
+        `--timeout=${cfg.requestTimeoutSec}`,
+        `--retries=${cfg.retries}`,
         "--smart",
         `--output-dir=${outDir}`,
       ];
@@ -65,10 +94,10 @@ export async function runSqlmap(ctx: RunContext, paramUrls: string[]): Promise<S
         const res = await run(tool.file, args, {
           allowNonZeroExit: true,
           tolerateTimeout: true,
-          timeoutMs: LIMITS.toolTimeoutMs.sqlmap,
+          timeoutMs: cfg.targetTimeoutMs,
         });
         findings.push(...parseSqlmapStdout(res.stdout, url));
-        if (res.timedOut) ctx.log.warn({ url }, "scan: sqlmap PARTIAL (timed out) — kept parsed injection points");
+        if (res.timedOut) ctx.log.warn({ url }, "scan: sqlmap PARTIAL (target timeout) — kept parsed injection points");
       } catch (err) {
         ctx.log.error({ err, url }, "scan: sqlmap failed for url");
       }
@@ -79,13 +108,13 @@ export async function runSqlmap(ctx: RunContext, paramUrls: string[]): Promise<S
   }
 
   if (findings.length === 0) {
-    ctx.log.info("scan: sqlmap found no SQL injection");
+    ctx.log.info({ budgetHit }, "scan: sqlmap found no SQL injection");
     return null;
   }
 
   const outPath = path.join(rawDir(ctx.runId), "sqlmap.generic.json");
   await writeGenericFindingsFile(outPath, findings);
-  ctx.log.info({ outPath, findings: findings.length }, "scan: sqlmap complete");
+  ctx.log.info({ outPath, findings: findings.length, done, budgetHit }, "scan: sqlmap complete");
   return { tool: "sqlmap", dojoScanType: "Generic Findings Import", filePath: outPath, format: "json", target: "aggregate" };
 }
 

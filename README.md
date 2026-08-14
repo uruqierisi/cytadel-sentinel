@@ -39,8 +39,13 @@ recon → scan → normalize → import(DefectDojo) → report
 - **Active injection (opt-in, destructive)** — `dalfox` (XSS) and `sqlmap` (SQLi)
   run **only** when the destructive gate is open (`allow_destructive: true` in
   scope **and** `--allow-destructive`), against in-scope discovered param URLs.
-  When the gate is closed (default) they are skipped silently and the report says
-  active injection was not performed.
+  Targets are **deduped by injection signature** (path + param *name*, ignoring
+  values — `?id=1` and `?id=2` are one test) and capped
+  (`SENTINEL_MAX_INJECTION_TARGETS`, default 25). sqlmap runs with fast flags
+  (low level/risk, `--technique=BEU`, threads), a **hard per-target timeout**, and
+  an **overall wall-clock budget** (`SENTINEL_SQLMAP_BUDGET_MS`); both tools keep
+  partial findings if killed. When the gate is closed (default) they are skipped
+  silently and the report says active injection was not performed.
 - **Normalize** — every tool's raw output → one unified finding schema, deduped
   by `tool + template-id + host + matched-location`.
 - **DefectDojo** — findings are imported via DefectDojo's native `import-scan`
