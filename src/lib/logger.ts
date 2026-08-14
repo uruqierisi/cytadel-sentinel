@@ -1,23 +1,33 @@
+import fs from "node:fs";
+import path from "node:path";
 import pino from "pino";
-
-const level = process.env.LOG_LEVEL ?? "info";
-const pretty = process.env.LOG_PRETTY === "1";
+import { PRETTY_MODE } from "./mode.js";
 
 /**
- * Structured logger. In dev, LOG_PRETTY=1 gives human-readable output via
- * pino-pretty (a devDependency); in CI/prod leave it unset for JSON lines.
+ * The FILE/structured-log channel (separate from the human CONSOLE channel in
+ * ui.ts, and separate again from the compliance audit trail in audit.ts).
+ *
+ * Sink selection:
+ *   - PRETTY mode  -> logs/sentinel.log  (terminal stays clean; the reporter
+ *                     draws the UI). LOG_LEVEL controls this FILE log's verbosity.
+ *   - JSON/CI mode -> stdout as raw JSON lines (for piping / CI).
+ *
+ * The audit JSONL sidecar (audit/audit.jsonl) is unaffected by any of this — it
+ * is written directly in audit.ts and remains byte-for-byte the compliance record.
  */
-export const logger = pino(
-  pretty
-    ? {
-        level,
-        transport: {
-          target: "pino-pretty",
-          options: { colorize: true, translateTime: "SYS:HH:MM:ss", ignore: "pid,hostname" },
-        },
-      }
-    : { level },
-);
+
+const level = process.env.LOG_LEVEL ?? "info";
+
+function fileDestination(): pino.DestinationStream {
+  const dir = path.resolve(process.cwd(), "logs");
+  fs.mkdirSync(dir, { recursive: true });
+  // sync:true so a short-lived CLI process never loses trailing log lines on exit.
+  return pino.destination({ dest: path.join(dir, "sentinel.log"), append: true, sync: true });
+}
+
+const destination = PRETTY_MODE ? fileDestination() : pino.destination(1); // fd 1 = stdout
+
+export const logger = pino({ level }, destination);
 
 /** Child logger bound to a run id so every line is correlatable. */
 export function runLogger(runId: string) {

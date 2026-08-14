@@ -153,6 +153,28 @@ npm run sentinel -- status <run-id>
 After `npm run build`, the CLI is also available as `node dist/cli.js …` (or the
 `sentinel` bin).
 
+### Terminal output
+
+The terminal shows a clean, human reporter by default: a header, one section per
+stage (Recon / Scan / Normalize / Import / Report) that resolves to ✓/✗ with a
+short result, and a color-coded severity summary with a clickable report link.
+
+- **`--json`** (or `CI=true`, or a non-TTY stdout, e.g. piping) → raw structured
+  JSON log lines instead, for CI and piping.
+- **`--verbose`** → per-host / debug detail under each stage.
+- **`SENTINEL_UI=pretty|json`** forces a mode; `auto` (default) decides by TTY/CI.
+
+Two separate channels, never mixed:
+
+| Channel | Destination | Controlled by |
+|---------|-------------|---------------|
+| Human reporter | terminal (pretty mode) | `--verbose`, TTY |
+| Structured log | `logs/sentinel.log` (pretty) or stdout JSON (CI/`--json`) | `LOG_LEVEL` |
+| **Audit trail** | `audit/audit.jsonl` + Postgres | always on (compliance) |
+
+The audit trail is independent of terminal presentation — changing the UI never
+changes `audit/audit.jsonl`.
+
 ### Where reports land
 
 ```

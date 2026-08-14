@@ -6,6 +6,7 @@ import { resolveAuth } from "../config/auth.js";
 import { evaluateScope, type ScopeDecision } from "../config/inScope.js";
 import { audit } from "../lib/audit.js";
 import { runLogger } from "../lib/logger.js";
+import { RunBus } from "./events.js";
 
 /**
  * Per-run context threaded through every stage. Bundles the validated scope,
@@ -22,6 +23,8 @@ export interface RunContext {
   /** Effective: scope.allow_destructive AND the --allow-destructive CLI flag. */
   allowDestructive: boolean;
   log: Logger;
+  /** Lifecycle event bus the reporter subscribes to. Stages emit onto it. */
+  bus: RunBus;
 }
 
 export function createRunContext(params: {
@@ -29,6 +32,7 @@ export function createRunContext(params: {
   actor: string;
   loaded: LoadedScope;
   cliAllowDestructive: boolean;
+  bus?: RunBus;
 }): RunContext {
   const { runId, actor, loaded, cliAllowDestructive } = params;
   return {
@@ -41,6 +45,7 @@ export function createRunContext(params: {
     // BOTH gates must be true for destructive checks to be permitted.
     allowDestructive: loaded.scope.allow_destructive && cliAllowDestructive,
     log: runLogger(runId),
+    bus: params.bus ?? new RunBus(),
   };
 }
 

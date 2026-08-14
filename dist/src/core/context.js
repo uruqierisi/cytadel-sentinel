@@ -2,6 +2,7 @@ import { resolveAuth } from "../config/auth.js";
 import { evaluateScope } from "../config/inScope.js";
 import { audit } from "../lib/audit.js";
 import { runLogger } from "../lib/logger.js";
+import { RunBus } from "./events.js";
 export function createRunContext(params) {
     const { runId, actor, loaded, cliAllowDestructive } = params;
     return {
@@ -14,6 +15,7 @@ export function createRunContext(params) {
         // BOTH gates must be true for destructive checks to be permitted.
         allowDestructive: loaded.scope.allow_destructive && cliAllowDestructive,
         log: runLogger(runId),
+        bus: params.bus ?? new RunBus(),
     };
 }
 /**

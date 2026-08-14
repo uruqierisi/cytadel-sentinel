@@ -3,6 +3,7 @@ import { audit, currentActor } from "../lib/audit.js";
 import { loadScope } from "../config/scope.js";
 import { createRunContext } from "./context.js";
 import { evaluateScope } from "../config/inScope.js";
+import { getBus } from "./events.js";
 /**
  * Create a Run row from a scope file. Validates + loads the scope, records who
  * triggered it and the scope hash, and performs the mandatory up-front scope
@@ -61,6 +62,9 @@ export async function contextForJob(data) {
         actor: data.actor,
         loaded,
         cliAllowDestructive: data.allowDestructive,
+        // Reuse the bus the CLI reporter subscribed to (in-process runInline);
+        // detached/standalone workers get a fresh, unsubscribed bus.
+        bus: getBus(data.runId),
     });
 }
 //# sourceMappingURL=run.js.map

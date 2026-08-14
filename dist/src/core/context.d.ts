@@ -3,6 +3,7 @@ import type { Scope } from "../config/schema.js";
 import type { ResolvedAuth } from "../config/auth.js";
 import type { LoadedScope } from "../config/scope.js";
 import { type ScopeDecision } from "../config/inScope.js";
+import { RunBus } from "./events.js";
 /**
  * Per-run context threaded through every stage. Bundles the validated scope,
  * the scope gate, resolved auth, and effective destructive setting so no stage
@@ -18,12 +19,15 @@ export interface RunContext {
     /** Effective: scope.allow_destructive AND the --allow-destructive CLI flag. */
     allowDestructive: boolean;
     log: Logger;
+    /** Lifecycle event bus the reporter subscribes to. Stages emit onto it. */
+    bus: RunBus;
 }
 export declare function createRunContext(params: {
     runId: string;
     actor: string;
     loaded: LoadedScope;
     cliAllowDestructive: boolean;
+    bus?: RunBus;
 }): RunContext;
 /**
  * The single choke point stages call for every candidate target. Evaluates the

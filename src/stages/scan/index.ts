@@ -64,16 +64,20 @@ export async function runScan(ctx: RunContext, recon: ReconResult): Promise<Scan
   const artifacts: ScanArtifact[] = [];
 
   // nuclei over all URLs (one aggregate artifact).
+  ctx.bus.stageProgress("scan", `nuclei over ${urls.length} URL(s)`, true);
   const nucleiArtifact = await runNuclei(ctx, urls);
   if (nucleiArtifact) artifacts.push(nucleiArtifact);
 
   // nikto per URL.
+  ctx.bus.stageProgress("scan", `nikto over ${urls.length} URL(s)`, true);
   artifacts.push(...(await runNikto(ctx, urls)));
 
   // testssl per host:port.
+  ctx.bus.stageProgress("scan", `testssl over ${tlsHosts.size} host(s)`, true);
   artifacts.push(...(await runTestssl(ctx, [...tlsHosts])));
 
   // retire.js over discovered JS assets.
+  ctx.bus.stageProgress("scan", `retire.js over ${recon.jsUrls.length} JS asset(s)`, true);
   const retireArtifact = await runRetire(ctx, recon.jsUrls);
   if (retireArtifact) artifacts.push(retireArtifact);
 

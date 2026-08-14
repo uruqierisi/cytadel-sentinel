@@ -9,6 +9,9 @@ import { createRun } from "./src/core/run.js";
 import { runInline, enqueueRunJob, startWorker, closeQueue } from "./src/core/queue.js";
 import { prisma, disconnectDb } from "./src/db/client.js";
 import { logger } from "./src/lib/logger.js";
+import { JSON_MODE, VERBOSE } from "./src/lib/mode.js";
+import { RunBus, registerBus, unregisterBus } from "./src/core/events.js";
+import { createReporter } from "./src/lib/ui.js";
 /**
  * Cytadel Sentinel CLI (Phase 1, on-demand).
  *
@@ -96,27 +99,42 @@ program
     .description("Run the full pipeline on-demand against a validated scope")
     .option("--allow-destructive", "permit destructive checks (also requires scope allow_destructive: true)", false)
     .option("--detach", "enqueue the job and exit without waiting (needs a running worker)", false)
+    .option("--json", "raw JSON log lines instead of the pretty CLI (auto in CI / non-TTY)", false)
+    .option("--verbose", "show per-host / debug detail under each stage", false)
     .action(async (scopeFile, opts) => {
     try {
         const { runId, jobData } = await createRun({ scopeFile, allowDestructive: opts.allowDestructive });
-        console.log(`▶ run created: ${runId}`);
         if (opts.detach) {
             await enqueueRunJob(jobData);
-            console.log(`  queued (detached). Process with:  sentinel worker`);
-            console.log(`  check status with:                sentinel status ${runId}`);
+            console.log(`run ${runId} queued (detached). Process with: sentinel worker`);
+            console.log(`check status with: sentinel status ${runId}`);
             return;
         }
-        console.log("  executing pipeline (recon → scan → normalize → import → report) ...");
-        const outcome = await runInline(jobData);
-        if (outcome.status === "COMPLETED") {
-            console.log(`\n✔ run COMPLETED: ${runId}`);
-            console.log(`  report: ${outcome.reportHtmlPath}`);
-            if (outcome.engagementId)
-                console.log(`  DefectDojo engagement: ${outcome.engagementId}`);
+        if (JSON_MODE) {
+            // JSON/CI: structured logs already stream to stdout; keep control output minimal.
+            console.log(`run ${runId} started`);
+            const outcome = await runInline(jobData);
+            if (outcome.status === "COMPLETED") {
+                console.log(`run ${runId} COMPLETED — report: ${outcome.reportHtmlPath}`);
+            }
+            else {
+                console.error(`run ${runId} FAILED — ${outcome.error}`);
+                process.exitCode = 1;
+            }
+            return;
         }
-        else {
-            console.error(`\n✗ run FAILED: ${runId}\n  ${outcome.error}`);
-            process.exitCode = 1;
+        // Pretty mode: the reporter owns the terminal via events on a shared bus.
+        const bus = new RunBus();
+        registerBus(runId, bus);
+        const reporter = createReporter(bus, { verbose: VERBOSE });
+        try {
+            const outcome = await runInline(jobData);
+            if (outcome.status === "FAILED")
+                process.exitCode = 1;
+        }
+        finally {
+            reporter.detach();
+            unregisterBus(runId);
         }
     }
     catch (err) {

@@ -3,6 +3,7 @@ import { audit, currentActor } from "../lib/audit.js";
 import { loadScope } from "../config/scope.js";
 import { createRunContext, type RunContext } from "./context.js";
 import { evaluateScope } from "../config/inScope.js";
+import { getBus } from "./events.js";
 
 /**
  * Run lifecycle helpers: create the Run row from a validated scope, and rebuild
@@ -85,5 +86,8 @@ export async function contextForJob(data: RunJobData): Promise<RunContext> {
     actor: data.actor,
     loaded,
     cliAllowDestructive: data.allowDestructive,
+    // Reuse the bus the CLI reporter subscribed to (in-process runInline);
+    // detached/standalone workers get a fresh, unsubscribed bus.
+    bus: getBus(data.runId),
   });
 }

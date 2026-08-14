@@ -95,9 +95,22 @@ export async function runRecon(ctx: RunContext): Promise<ReconResult> {
   const inScopeHosts = await gateMany(ctx, [...discovered]);
   for (const h of inScopeHosts) await persistSimple(ctx, "SUBDOMAIN", h);
   ctx.log.info({ discovered: discovered.size, inScope: inScopeHosts.length }, "recon: hosts gated");
+  // Collapse the per-target SCOPE_ACCEPT decisions into one reporter line.
+  ctx.bus.scopeSummary(inScopeHosts.length, discovered.size);
+  if (inScopeHosts.length < discovered.size) {
+    ctx.bus.stageProgress(
+      "recon",
+      `${discovered.size - inScopeHosts.length} host(s) rejected by scope gate`,
+      true,
+    );
+  }
 
   // 3) Liveness + fingerprint (in-scope only).
   const alive = await httpx(ctx, inScopeHosts);
+  ctx.bus.stageProgress("recon", `${alive.length} host(s) alive`, true);
+  for (const r of alive) {
+    ctx.bus.stageProgress("recon", `${r.url} [${r.statusCode ?? "?"}] ${r.title ?? ""}`.trim(), true);
+  }
 
   // 4) Light port context per alive host + persist host assets.
   const webTargets: HttpxResult[] = [];
