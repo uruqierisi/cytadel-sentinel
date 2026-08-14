@@ -1,0 +1,36 @@
+/**
+ * Phase 2 — scheduled weekly runs + verification layer. SCAFFOLD ONLY.
+ *
+ * Design intent (do NOT enable in Phase 1):
+ *   - A cron trigger (node-cron or a system cron/systemd timer calling
+ *     `sentinel run <scope>`) enqueues a run weekly per registered scope.
+ *   - After the report stage, run the verification stage (stages/verify) to
+ *     confirm AUTO findings and route MANUAL ones to a review queue.
+ *
+ * Everything below is intentionally inert. Wiring it is Phase-2 work.
+ */
+import type { RunContext } from "./context.js";
+export interface ScheduledScope {
+    scopeFile: string;
+    /** Cron expression, e.g. "0 3 * * 1" (Mondays 03:00). */
+    cron: string;
+    actor: string;
+}
+export declare const SCHEDULED_SCOPES: ScheduledScope[];
+/**
+ * TODO(Phase 2): register cron jobs that enqueue runs for each ScheduledScope.
+ * Implementation sketch:
+ *   import cron from "node-cron";
+ *   for (const s of SCHEDULED_SCOPES)
+ *     cron.schedule(s.cron, async () => {
+ *       const { jobData } = await createRun({ scopeFile: s.scopeFile, actor: s.actor, allowDestructive: false });
+ *       await enqueueRunJob(jobData);
+ *     });
+ */
+export declare function startScheduler(): never;
+/**
+ * TODO(Phase 2): call runVerify(ctx) from executePipeline AFTER the report
+ * stage (or as its own queued follow-up job) once the AUTO verifiers in
+ * stages/verify/verifiers.ts are complete.
+ */
+export declare function runVerificationLayer(_ctx: RunContext): Promise<never>;

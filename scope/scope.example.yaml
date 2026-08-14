@@ -1,0 +1,45 @@
+# Cytadel Sentinel — scope definition (EXAMPLE).
+#
+# Copy to scope/<name>.yaml and edit. Real scope files are gitignored.
+# The scope gate is MANDATORY: nothing (recon, scan, verify) runs against any
+# host not resolved as in-scope here. Exclusions ALWAYS win over inclusions.
+#
+# Secrets (session cookies/headers) are NEVER stored here — only the NAME of the
+# environment variable that holds them.
+
+name: "acme-web"
+authorized_by: "security@company"
+authorization_ref: "TICKET-123"
+
+in_scope:
+  # Wildcards supported: "*.acme.com" matches app.acme.com, api.acme.com, etc.
+  # (a bare "*.acme.com" does NOT match the apex "acme.com" — list it explicitly).
+  domains:
+    - "app.acme.com"
+    - "*.acme.com"
+  urls:
+    - "https://app.acme.com"
+
+exclusions:
+  # Excluded domains are hard-rejected even if they match an in_scope wildcard.
+  domains:
+    - "status.acme.com"
+  # Excluded paths block URLs whose path starts with any of these prefixes.
+  paths:
+    - "/logout"
+    - "/delete"
+
+auth:
+  # cookie | header | none
+  type: "cookie"
+  # Name of the ENV VAR holding the session material (value read at runtime).
+  # For type: cookie  -> a Cookie header value, e.g. "session=abc; csrf=def"
+  # For type: header  -> a full header line, e.g. "Authorization: Bearer <jwt>"
+  session: "SENTINEL_SESSION_COOKIE"
+
+# Global politeness cap applied to active scanners (requests/sec).
+rate_limit_rps: 10
+
+# Destructive checks (stacked SQLi, write/delete payloads) stay OFF unless this
+# is true AND the CLI is invoked with --allow-destructive. Both gates required.
+allow_destructive: false

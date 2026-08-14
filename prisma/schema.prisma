@@ -1,0 +1,161 @@
+// Cytadel Sentinel — pipeline state.
+// DefectDojo owns vulnerability management (storage, cross-run dedupe, triage).
+// This DB holds only lightweight run/asset/finding state + the append-only audit log.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// --------------------------------------------------------------------------
+// Enums
+// --------------------------------------------------------------------------
+
+enum RunStatus {
+  QUEUED
+  RECON
+  SCAN
+  NORMALIZE
+  IMPORT
+  REPORT
+  COMPLETED
+  FAILED
+  REJECTED // scope gate rejected the whole target set
+}
+
+enum AssetType {
+  SUBDOMAIN
+  HOST
+  URL
+  ENDPOINT
+  PORT
+  JS_ASSET
+}
+
+enum Severity {
+  INFO
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+// Verification lifecycle (Phase 2 wires the transitions; Phase 1 stores UNVERIFIED).
+enum VerificationStatus {
+  UNVERIFIED
+  VERIFIED
+  LOW_CONFIDENCE
+  MANUAL_REVIEW
+  NEVER_AUTO // destructive-class findings; never auto-verified
+}
+
+// --------------------------------------------------------------------------
+// Models
+// --------------------------------------------------------------------------
+
+model Run {
+  id                     String    @id @default(cuid())
+  status                 RunStatus @default(QUEUED)
+
+  // Provenance / audit
+  triggeredBy            String
+  scopeName              String
+  scopeHash              String // sha256 of the canonicalized scope config
+  authorizedBy          String
+  authorizationRef       String
+  allowDestructive       Boolean   @default(false)
+
+  // DefectDojo linkage
+  defectDojoProductId    Int?
+  defectDojoEngagementId Int?
+
+  reportPath             String?
+  error                  String?
+
+  startedAt              DateTime  @default(now())
+  finishedAt             DateTime?
+
+  assets                 Asset[]
+  findings               Finding[]
+  auditLogs              AuditLog[]
+
+  @@index([scopeName])
+  @@index([status])
+}
+
+model Asset {
+  id         String    @id @default(cuid())
+  run        Run       @relation(fields: [runId], references: [id], onDelete: Cascade)
+  runId      String
+
+  type       AssetType
+  value      String // subdomain / URL / host:port etc.
+  inScope    Boolean   @default(true)
+
+  // Fingerprint (httpx / naabu)
+  alive      Boolean   @default(false)
+  statusCode Int?
+  title      String?
+  server     String?
+  tech       String[]  @default([])
+  ports      Int[]     @default([])
+
+  createdAt  DateTime  @default(now())
+
+  @@unique([runId, type, value])
+  @@index([runId])
+  @@index([inScope])
+}
+
+model Finding {
+  id                 String             @id @default(cuid())
+  run                Run                @relation(fields: [runId], references: [id], onDelete: Cascade)
+  runId              String
+
+  sourceTool         String // nuclei | nikto | testssl | retirejs | ...
+  templateId         String? // nuclei template-id / rule id where available
+  name               String
+  target             String // host or URL the finding applies to
+  matchedLocation    String? // matched-at URL / port / path
+  severity           Severity           @default(INFO)
+  cvss               Float?
+  epss               Float?
+
+  evidence           String? // human-readable evidence snippet
+  raw                Json // full raw tool record
+
+  // Dedupe key = sourceTool + templateId + host + matchedLocation
+  dedupeKey          String
+
+  verificationStatus VerificationStatus @default(UNVERIFIED)
+  defectDojoId       Int? // finding id in DefectDojo after import
+
+  createdAt          DateTime           @default(now())
+
+  @@unique([runId, dedupeKey])
+  @@index([runId])
+  @@index([severity])
+}
+
+// Append-only. Never updated or deleted in application code.
+model AuditLog {
+  id         String   @id @default(cuid())
+  run        Run?     @relation(fields: [runId], references: [id], onDelete: SetNull)
+  runId      String?
+
+  timestamp  DateTime @default(now())
+  actor      String // who triggered / caused the action
+  action     String // e.g. RUN_START, SCOPE_ACCEPT, SCOPE_REJECT, TOOL_EXEC, IMPORT
+  scopeHash  String?
+  target     String? // specific target touched, when applicable
+  tools      Json? // { tool: version } map for TOOL_EXEC / run summary
+  detail     Json? // arbitrary structured context
+
+  @@index([runId])
+  @@index([action])
+  @@index([timestamp])
+}

@@ -1,0 +1,120 @@
+# Cytadel Sentinel — DefectDojo vulnerability-management backend.
+#
+# This is a self-contained, pinned DefectDojo stack (Django + Nginx + Postgres +
+# Redis + Celery) modeled on the upstream DefectDojo compose. Sentinel imports
+# tool output here via the /api/v2 import-scan endpoint and lets DefectDojo own
+# storage, cross-run dedupe, and triage.
+#
+# Brought up (and health-waited) by scripts/setup.sh. Admin URL + API-key
+# instructions are printed once healthy.
+#
+# NOTE: the initializer prints the generated admin password to its logs on first
+# boot (setup.sh surfaces it). Change it after first login.
+
+x-django-env: &django-env
+  DD_DEBUG: "False"
+  DD_ALLOWED_HOSTS: "*"
+  DD_DATABASE_URL: "postgresql://defectdojo:defectdojo@postgres:5432/defectdojo"
+  DD_CELERY_BROKER_URL: "redis://redis:6379/0"
+  DD_SECRET_KEY: "change-me-in-production-please-rotate"
+  DD_CREDENTIAL_AES_256_KEY: "change-me-too-rotate-this-key-now"
+  DD_ADMIN_USER: "admin"
+  DD_ADMIN_MAIL: "admin@sentinel.local"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: defectdojo
+      POSTGRES_USER: defectdojo
+      POSTGRES_PASSWORD: defectdojo
+    volumes:
+      - dd_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U defectdojo -d defectdojo"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - dd_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  initializer:
+    image: defectdojo/defectdojo-django:latest
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      <<: *django-env
+      DD_INITIALIZE: "true"
+    entrypoint: ["/wait-for-it.sh", "postgres:5432", "--", "/entrypoint-initializer.sh"]
+    restart: "no"
+
+  uwsgi:
+    image: defectdojo/defectdojo-django:latest
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      <<: *django-env
+      DD_INITIALIZE: "false"
+    entrypoint: ["/wait-for-it.sh", "postgres:5432", "--", "/entrypoint-uwsgi.sh"]
+    restart: unless-stopped
+
+  celerybeat:
+    image: defectdojo/defectdojo-django:latest
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      <<: *django-env
+      DD_INITIALIZE: "false"
+    entrypoint: ["/wait-for-it.sh", "postgres:5432", "--", "/entrypoint-celery-beat.sh"]
+    restart: unless-stopped
+
+  celeryworker:
+    image: defectdojo/defectdojo-django:latest
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      <<: *django-env
+      DD_INITIALIZE: "false"
+    entrypoint: ["/wait-for-it.sh", "postgres:5432", "--", "/entrypoint-celery-worker.sh"]
+    restart: unless-stopped
+
+  nginx:
+    image: defectdojo/defectdojo-nginx:latest
+    depends_on:
+      - uwsgi
+    environment:
+      DD_UWSGI_HOST: "uwsgi"
+      DD_UWSGI_PORT: "3031"
+    ports:
+      # Host 8080 -> DefectDojo UI/API. Matches DEFECTDOJO_URL in .env.example.
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8080/login?next=/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+volumes:
+  dd_postgres:
+  dd_redis:

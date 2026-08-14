@@ -1,0 +1,39 @@
+# Phase 3 — CI-integrated DAST-lite on staging deploy. STUB ONLY.
+#
+# This workflow is intentionally NOT active. It documents the intended Phase-3
+# integration: after a staging deploy, run a lightweight, time-boxed Sentinel
+# pass against the staging scope and fail the pipeline on new HIGH/CRITICAL
+# findings.
+#
+# To enable in Phase 3:
+#   1. Remove the `if: false` guard on the job.
+#   2. Provide DATABASE_URL / REDIS_URL / DEFECTDOJO_* as CI secrets.
+#   3. Ensure the runner has the tools installed (scripts/setup.sh in the image).
+#   4. Point SCOPE_FILE at a staging-only scope with allow_destructive: false.
+
+name: sentinel-dast-lite
+
+on:
+  # TODO(Phase 3): trigger on successful staging deploy (workflow_run / deployment_status).
+  workflow_dispatch: {}
+
+jobs:
+  dast-lite:
+    if: false # STUB — do not run until Phase 3.
+    runs-on: ubuntu-latest
+    env:
+      SCOPE_FILE: scope/staging.yaml
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      # TODO(Phase 3): install security tools (cache the go bin + templates).
+      - name: Install tools
+        run: bash scripts/setup.sh
+      - name: Install deps + build
+        run: npm ci && npm run build && npm run prisma:deploy
+      # TODO(Phase 3): time-box the run and gate on new HIGH/CRITICAL via the
+      # DefectDojo engagement delta rather than a full report.
+      - name: Sentinel DAST-lite
+        run: node dist/cli.js run "$SCOPE_FILE"
