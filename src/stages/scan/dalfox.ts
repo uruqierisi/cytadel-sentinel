@@ -96,7 +96,10 @@ export async function runDalfox(ctx: RunContext, signatures: string[]): Promise<
     if ((await gate(ctx, u)).allowed) targets.push(u);
   }
   if (targets.length === 0) return null;
-  ctx.log.info({ signatures: targets.length }, "scan: dalfox running over deduped signatures");
+  // Log the FULL target list so we can confirm every signature (e.g.
+  // Search.asp?tfSearch) is fuzzed — dalfox pipe processes every stdin line, not
+  // just the last.
+  ctx.log.info({ signatures: targets.length, targets }, "scan: dalfox running over deduped signatures");
   ctx.bus.stageProgress("scan", `dalfox: ${targets.length} deduped signature(s)`, false);
 
   const cfg = LIMITS.dalfox;

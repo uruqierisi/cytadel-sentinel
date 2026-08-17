@@ -52,53 +52,46 @@ export async function runSqlmap(ctx: RunContext, signatures: string[]): Promise<
   });
 
   const cfg = LIMITS.sqlmap;
-  const outDir = path.join(rawDir(ctx.runId), "sqlmap");
+  const baseOutDir = path.join(rawDir(ctx.runId), "sqlmap");
+  // Build ONE invocation per signature up front — each with its OWN output dir so
+  // same-host targets never overwrite each other's target.txt / session.sqlite.
+  const invocations = planSqlmapInvocations(tool.baseArgs, targets, cfg, baseOutDir, ctx.auth.headerLines);
+  ctx.log.info(
+    { targets: invocations.map((i) => i.url) },
+    "scan: sqlmap invocations (one -u run per signature, isolated output dir)",
+  );
+
   const findings: GenericFinding[] = [];
   const startedAt = Date.now();
   let done = 0;
   let budgetHit = false;
-  const hb = startHeartbeat(ctx, "scan", "sqlmap", { total: targets.length, getDone: () => done });
+  const hb = startHeartbeat(ctx, "scan", "sqlmap", { total: invocations.length, getDone: () => done });
   try {
-    for (const url of targets) {
+    for (const inv of invocations) {
       // Overall time budget: stop launching new targets once exceeded.
       if (Date.now() - startedAt >= cfg.budgetMs) {
         budgetHit = true;
         ctx.log.warn(
-          { done, total: targets.length, budgetMs: cfg.budgetMs },
+          { done, total: invocations.length, budgetMs: cfg.budgetMs },
           "scan: sqlmap overall budget reached — stopping (keeping findings so far)",
         );
-        ctx.bus.stageProgress("scan", `sqlmap budget reached at ${done}/${targets.length} — kept findings so far`, false);
+        ctx.bus.stageProgress("scan", `sqlmap budget reached at ${done}/${invocations.length} — kept findings so far`, false);
         break;
       }
 
-      const args = [
-        ...tool.baseArgs,
-        "-u",
-        url,
-        "--batch",
-        "--disable-coloring",
-        `--level=${cfg.level}`,
-        `--risk=${cfg.risk}`,
-        `--technique=${cfg.technique}`,
-        `--threads=${cfg.threads}`,
-        `--timeout=${cfg.requestTimeoutSec}`,
-        `--retries=${cfg.retries}`,
-        "--smart",
-        `--output-dir=${outDir}`,
-      ];
-      for (const line of ctx.auth.headerLines) {
-        args.push("-H", line);
-      }
+      // One visible line per target so all N runs are confirmable.
+      ctx.bus.stageProgress("scan", `sqlmap testing ${inv.url}`, false);
+      ctx.log.info({ url: inv.url, outDir: inv.outDir }, "scan: sqlmap testing target");
       try {
-        const res = await run(tool.file, args, {
+        const res = await run(tool.file, inv.args, {
           allowNonZeroExit: true,
           tolerateTimeout: true,
           timeoutMs: cfg.targetTimeoutMs,
         });
-        findings.push(...parseSqlmapStdout(res.stdout, url));
-        if (res.timedOut) ctx.log.warn({ url }, "scan: sqlmap PARTIAL (target timeout) — kept parsed injection points");
+        findings.push(...parseSqlmapStdout(res.stdout, inv.url));
+        if (res.timedOut) ctx.log.warn({ url: inv.url }, "scan: sqlmap PARTIAL (target timeout) — kept parsed injection points");
       } catch (err) {
-        ctx.log.error({ err, url }, "scan: sqlmap failed for url");
+        ctx.log.error({ err, url: inv.url }, "scan: sqlmap failed for url");
       }
       done++;
     }
@@ -115,6 +108,77 @@ export async function runSqlmap(ctx: RunContext, signatures: string[]): Promise<
   await writeGenericFindingsFile(outPath, findings);
   ctx.log.info({ outPath, findings: findings.length, done, budgetHit }, "scan: sqlmap complete");
   return { tool: "sqlmap", dojoScanType: "Generic Findings Import", filePath: outPath, format: "json", target: "aggregate" };
+}
+
+/** sqlmap speed/depth knobs used to build an invocation. */
+export interface SqlmapCfg {
+  level: number;
+  risk: number;
+  technique: string;
+  threads: number;
+  requestTimeoutSec: number;
+  retries: number;
+}
+
+export interface SqlmapInvocation {
+  url: string;
+  outDir: string;
+  args: string[];
+}
+
+/**
+ * Per-target output dir. All signatures share one host (testasp.vulnweb.com), so
+ * a single output dir would collide (sqlmap namespaces by host and overwrites
+ * target.txt/session per host). A unique dir per target keeps every run isolated.
+ */
+export function sqlmapTargetOutDir(baseDir: string, url: string, index: number): string {
+  const slug = createHash("sha1").update(url).digest("hex").slice(0, 12);
+  return path.join(baseDir, `t${index}_${slug}`);
+}
+
+/** Build the full sqlmap argv for a SINGLE target URL. */
+export function buildSqlmapArgs(
+  baseArgs: string[],
+  url: string,
+  cfg: SqlmapCfg,
+  outDir: string,
+  headerLines: string[] = [],
+): string[] {
+  const args = [
+    ...baseArgs,
+    "-u",
+    url,
+    "--batch",
+    "--disable-coloring",
+    `--level=${cfg.level}`,
+    `--risk=${cfg.risk}`,
+    `--technique=${cfg.technique}`,
+    `--threads=${cfg.threads}`,
+    `--timeout=${cfg.requestTimeoutSec}`,
+    `--retries=${cfg.retries}`,
+    "--smart",
+    `--output-dir=${outDir}`,
+  ];
+  for (const line of headerLines) args.push("-H", line);
+  return args;
+}
+
+/**
+ * Plan ONE sqlmap invocation per signature — each with its own isolated output
+ * dir. This is the seam that guarantees every deduped signature is tested (never
+ * collapsed to one) and is unit-testable without executing sqlmap.
+ */
+export function planSqlmapInvocations(
+  baseArgs: string[],
+  targets: string[],
+  cfg: SqlmapCfg,
+  baseOutDir: string,
+  headerLines: string[] = [],
+): SqlmapInvocation[] {
+  return targets.map((url, index) => {
+    const outDir = sqlmapTargetOutDir(baseOutDir, url, index);
+    return { url, outDir, args: buildSqlmapArgs(baseArgs, url, cfg, outDir, headerLines) };
+  });
 }
 
 /**

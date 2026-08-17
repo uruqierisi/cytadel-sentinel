@@ -1,7 +1,14 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import path from "node:path";
 import { describe, test, expect } from "vitest";
-import { parseSqlmapStdout } from "./sqlmap.js";
+import {
+  parseSqlmapStdout,
+  planSqlmapInvocations,
+  buildSqlmapArgs,
+  sqlmapTargetOutDir,
+  type SqlmapCfg,
+} from "./sqlmap.js";
 
 // Use globalThis.URL: the `URL` const below shadows the URL constructor name.
 const fixture = (name: string): string =>
@@ -74,5 +81,69 @@ Parameter: cat (GET)
     // Both confirmed types landed before the cut.
     expect(f.evidence).toContain("boolean-based blind");
     expect(f.evidence).toContain("error-based");
+  });
+});
+
+describe("planSqlmapInvocations — one isolated invocation per signature", () => {
+  const CFG: SqlmapCfg = {
+    level: 2,
+    risk: 2,
+    technique: "BEUST",
+    threads: 4,
+    requestTimeoutSec: 10,
+    retries: 1,
+  };
+  const BASE_OUT = "/runs/abc/raw/sqlmap";
+  const SIGNATURES = [
+    "http://testasp.vulnweb.com/showforum.asp?id=1",
+    "http://testasp.vulnweb.com/showthread.asp?id=1",
+    "http://testasp.vulnweb.com/Search.asp?tfSearch=1",
+    "http://testasp.vulnweb.com/Templatize.asp?item=1",
+    "http://testasp.vulnweb.com/comment.asp?id=1",
+  ];
+
+  test("5 signatures => 5 invocations, one -u per URL", () => {
+    const plan = planSqlmapInvocations([], SIGNATURES, CFG, BASE_OUT);
+    expect(plan.length).toBe(5);
+
+    // Each invocation targets exactly its own URL (nothing collapsed/dropped).
+    const uOf = (args: string[]) => args[args.indexOf("-u") + 1];
+    expect(plan.map((p) => uOf(p.args))).toEqual(SIGNATURES);
+
+    // The real SQLi target IS among the executed targets.
+    expect(plan.some((p) => uOf(p.args) === "http://testasp.vulnweb.com/showforum.asp?id=1")).toBe(true);
+  });
+
+  test("each invocation gets a DISTINCT output dir (no target.txt overwrite)", () => {
+    const plan = planSqlmapInvocations([], SIGNATURES, CFG, BASE_OUT);
+    const outDirs = plan.map((p) => p.outDir);
+    expect(new Set(outDirs).size).toBe(5); // all distinct
+
+    // And the --output-dir arg matches the invocation's dir, nested under base.
+    for (const p of plan) {
+      expect(path.dirname(p.outDir)).toBe(path.normalize(BASE_OUT));
+      expect(p.args).toContain(`--output-dir=${p.outDir}`);
+    }
+  });
+
+  test("level/risk/technique escalation flows into every invocation", () => {
+    const plan = planSqlmapInvocations([], SIGNATURES, CFG, BASE_OUT);
+    for (const p of plan) {
+      expect(p.args).toContain("--level=2");
+      expect(p.args).toContain("--risk=2");
+      expect(p.args).toContain("--technique=BEUST");
+    }
+  });
+
+  test("two different URLs never share an output dir", () => {
+    const a = sqlmapTargetOutDir(BASE_OUT, "http://h/showforum.asp?id=1", 0);
+    const b = sqlmapTargetOutDir(BASE_OUT, "http://h/showthread.asp?id=1", 1);
+    expect(a).not.toBe(b);
+  });
+
+  test("headers are appended to each invocation", () => {
+    const args = buildSqlmapArgs([], SIGNATURES[0]!, CFG, "/out", ["Cookie: a=b"]);
+    expect(args).toContain("-H");
+    expect(args[args.indexOf("-H") + 1]).toBe("Cookie: a=b");
   });
 });
