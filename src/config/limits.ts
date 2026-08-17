@@ -91,21 +91,23 @@ export const LIMITS = {
 
   /**
    * sqlmap tuning. sqlmap only runs behind the destructive gate, so these are
-   * destructive-run defaults: level/risk 2 and time-based (T) IN the technique
-   * set, because blind SQLi (e.g. Juice Shop's SQLite search) often needs depth
-   * and time-based to confirm — BEU at level 1 missed it. Still env-overridable
-   * to dial back for speed.
+   * destructive-run defaults: level/risk 2 with the fast techniques BEU. Full
+   * testing (no --smart) at level/risk 2 confirms blind SQLi (e.g. Juice Shop's
+   * SQLite search) without T — and time-based (T) heavy queries overloaded the
+   * target, so T is left OUT by default but stays available via
+   * SENTINEL_SQLMAP_TECHNIQUE=BEUT. Lower threads + higher retries favor
+   * injection stability over raw speed.
    */
   sqlmap: {
     level: intFromEnv("SENTINEL_SQLMAP_LEVEL", 2),
     risk: intFromEnv("SENTINEL_SQLMAP_RISK", 2),
-    // B=boolean, E=error, U=union, T=time-based. T is included (blind SQLi needs
-    // it); S (stacked) stays out as it's the slowest and rarely required.
-    technique: process.env.SENTINEL_SQLMAP_TECHNIQUE ?? "BEUT",
-    threads: intFromEnv("SENTINEL_SQLMAP_THREADS", 4),
+    // B=boolean, E=error, U=union. T (time-based) is opt-in via env — its heavy
+    // queries can overload the target; S (stacked) stays out (slowest).
+    technique: process.env.SENTINEL_SQLMAP_TECHNIQUE ?? "BEU",
+    threads: intFromEnv("SENTINEL_SQLMAP_THREADS", 2),
     /** sqlmap --timeout (per HTTP request, seconds). */
     requestTimeoutSec: intFromEnv("SENTINEL_SQLMAP_REQ_TIMEOUT_SEC", 10),
-    retries: intFromEnv("SENTINEL_SQLMAP_RETRIES", 1),
+    retries: intFromEnv("SENTINEL_SQLMAP_RETRIES", 2),
     /** Hard exec cap PER target (ms) — was mistakenly 20 min for every URL. */
     targetTimeoutMs: intFromEnv("SENTINEL_SQLMAP_TARGET_TIMEOUT_MS", 90 * 1000),
     /** Overall wall-clock budget for the whole sqlmap stage (ms). */
