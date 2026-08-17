@@ -78,3 +78,70 @@ describe("scope gate — rejections", () => {
     expect(isInScope(scope, "API.ACME.COM")).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Local lab testing: "localhost" and bare IPv4 (e.g. Juice Shop on
+// 127.0.0.1:3000) must validate AND match through the scope gate.
+// ---------------------------------------------------------------------------
+describe("scope validation — local lab hosts", () => {
+  const parseWith = (domains: string[]) =>
+    ScopeSchema.safeParse({
+      name: "local-lab",
+      authorized_by: "me",
+      authorization_ref: "LOCAL",
+      in_scope: { domains },
+    });
+
+  test("accepts localhost", () => {
+    expect(parseWith(["localhost"]).success).toBe(true);
+  });
+
+  test("accepts bare IPv4 addresses", () => {
+    for (const ip of ["127.0.0.1", "10.0.0.5", "192.168.1.20"]) {
+      expect(parseWith([ip]).success).toBe(true);
+    }
+  });
+
+  test("still accepts FQDNs and wildcards", () => {
+    expect(parseWith(["example.com", "*.example.com"]).success).toBe(true);
+  });
+
+  test("rejects an out-of-range IPv4 octet", () => {
+    expect(parseWith(["256.0.0.1"]).success).toBe(false);
+  });
+
+  test("rejects garbage", () => {
+    expect(parseWith(["not a host"]).success).toBe(false);
+  });
+});
+
+describe("scope gate — local lab hosts", () => {
+  const lab = ScopeSchema.parse({
+    name: "juice-shop",
+    authorized_by: "me",
+    authorization_ref: "LOCAL",
+    in_scope: { domains: ["localhost", "127.0.0.1"] },
+  });
+
+  test("http://127.0.0.1:3000/... matches in_scope 127.0.0.1 (port ignored)", () => {
+    const d = evaluateScope(lab, "http://127.0.0.1:3000/#/login");
+    expect(d.allowed).toBe(true);
+    expect(d.host).toBe("127.0.0.1");
+    expect(d.reason).toBe("matched-domain");
+  });
+
+  test("http://localhost:3000 matches in_scope localhost", () => {
+    const d = evaluateScope(lab, "http://localhost:3000");
+    expect(d.allowed).toBe(true);
+    expect(d.host).toBe("localhost");
+  });
+
+  test("bare host:port form also matches (host compared, not port)", () => {
+    expect(isInScope(lab, "127.0.0.1:3000")).toBe(true);
+    expect(isInScope(lab, "localhost:3000/rest/products")).toBe(true);
+  });
+
+  test("a different local IP is still rejected", () => {
+    expect(isInScope(lab, "http://192.168.1.50:3000")).toBe(false);
+  });
+});

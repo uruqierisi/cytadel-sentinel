@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Cytadel Sentinel — Report cmssowxey00027kbyhjpiy3l7</title>
+<title>Cytadel Sentinel — Report cmsx31shk0002104flh3bssqk</title>
 <style>
   :root{
     --bg:#0a1626; --panel:#0f2036; --panel-2:#132a45; --ink:#e8f0fb; --muted:#8ea3c0;
@@ -54,21 +54,25 @@
 </svg>
     <div>
       <h1><span class="brand-mark">CYTADEL</span> SENTINEL — Security Report</h1>
-      <div class="sub">Authorized web-application penetration test · Run cmssowxey00027kbyhjpiy3l7</div>
+      <div class="sub">Authorized web-application penetration test · Run cmsx31shk0002104flh3bssqk</div>
     </div>
   </header>
 
+  <div class="banner">⚠ Destructive checks were ENABLED for this run (scope + CLI both authorized).</div>
 
+  <div class="banner" style="background:#0f2f1f;border-color:#2f9e6b;color:#c6ffe0">
+    Active injection testing was PERFORMED: dalfox (XSS) and sqlmap (SQLi) against in-scope parameters.
+  </div>
 
   <div class="meta">
-    <div><div class="k">Scope</div><div class="v">vulnweb-test</div></div>
+    <div><div class="k">Scope</div><div class="v">vulnweb-active</div></div>
     <div><div class="k">Authorized by</div><div class="v">kodeksi</div></div>
-    <div><div class="k">Authorization ref</div><div class="v">TICKET-123</div></div>
-    <div><div class="k">Scope hash</div><div class="v">2943c1980dacc2e903202e38…</div></div>
+    <div><div class="k">Authorization ref</div><div class="v">acunetix-public-test-site</div></div>
+    <div><div class="k">Scope hash</div><div class="v">4f77f20b110a91efdbafa27c…</div></div>
     <div><div class="k">Triggered by</div><div class="v">kodeksi</div></div>
-    <div><div class="k">Assets discovered</div><div class="v">1</div></div>
-    <div><div class="k">Started</div><div class="v">2026-08-14T08:33:35.530Z</div></div>
-    <div><div class="k">Finished</div><div class="v">2026-08-14T08:34:00.148Z</div></div>
+    <div><div class="k">Assets discovered</div><div class="v">406</div></div>
+    <div><div class="k">Started</div><div class="v">2026-08-17T10:20:21.753Z</div></div>
+    <div><div class="k">Finished</div><div class="v">2026-08-17T10:58:53.607Z</div></div>
   </div>
 
   <h2>Severity summary</h2>
@@ -90,20 +94,116 @@
         <div class="card-label">LOW</div>
       </div>
       <div class="card" style="--accent:#7a8699">
-        <div class="card-num">0</div>
+        <div class="card-num">8</div>
         <div class="card-label">INFO</div>
       </div></div>
 
-  <h2>Findings <span style="text-transform:none;float:right;font-size:13px"><a href="http://localhost:8080/engagement/1" target="_blank" rel="noopener">Open in DefectDojo →</a></span></h2>
+  <h2>Findings <span style="text-transform:none;float:right;font-size:13px"><a href="http://localhost:8080/engagement/14" target="_blank" rel="noopener">Open in DefectDojo →</a></span></h2>
   <table>
     <thead><tr><th style="width:90px">Severity</th><th>Finding</th><th style="width:180px">Target</th></tr></thead>
-    <tbody><tr><td colspan="3" class="empty">No findings reported for this engagement.</td></tr></tbody>
+    <tbody>
+    <tr>
+      <td><span class="sev" style="background:#7a8699">INFO</span></td>
+      <td>
+        <div class="f-title">Cookie ASPSESSIONIDAADQRDSB Created Without the Httponly Flag </div>
+        <div class="f-meta">defectdojo</div>
+        <div class="f-desc">**Host:** `http://44.238.29.244:80/`
+**Description:** `Cookie ASPSESSIONIDAADQRDSB created without the httponly flag`
+**HTTP Method:** `GET`</div>
+
+      </td>
+      <td class="f-target">(see DefectDojo)</td>
+    </tr>
+    <tr>
+      <td><span class="sev" style="background:#7a8699">INFO</span></td>
+      <td>
+        <div class="f-title">Retrieved X-Powered-by Header: ASP.NET </div>
+        <div class="f-meta">defectdojo</div>
+        <div class="f-desc">**Host:** `http://44.238.29.244:80/`
+**Description:** `Retrieved x-powered-by header: ASP.NET`
+**HTTP Method:** `GET`</div>
+
+      </td>
+      <td class="f-target">(see DefectDojo)</td>
+    </tr>
+    <tr>
+      <td><span class="sev" style="background:#7a8699">INFO</span></td>
+      <td>
+        <div class="f-title">The Anti-Clickjacking X-Frame-Options Header Is Not Present. </div>
+        <div class="f-meta">defectdojo</div>
+        <div class="f-desc">**Host:** `http://44.238.29.244:80/`
+**Description:** `The anti-clickjacking X-Frame-Options header is not present.`
+**HTTP Method:** `GET`</div>
+
+      </td>
+      <td class="f-target">(see DefectDojo)</td>
+    </tr>
+    <tr>
+      <td><span class="sev" style="background:#7a8699">INFO</span></td>
+      <td>
+        <div class="f-title">Retrieved X-Aspnet-Version Header: 2.0.50727 </div>
+        <div class="f-meta">defectdojo</div>
+        <div class="f-desc">**Host:** `http://44.238.29.244:80/tmq4wXDc.axd`
+**Description:** `Retrieved x-aspnet-version header: 2.0.50727`
+**HTTP Method:** `GET`</div>
+
+      </td>
+      <td class="f-target">(see DefectDojo)</td>
+    </tr>
+    <tr>
+      <td><span class="sev" style="background:#7a8699">INFO</span></td>
+      <td>
+        <div class="f-title">Server Leaks Inodes via ETags, Header Found With File /robots.txt, Fields: 0x3629faa394d51:0  </div>
+        <div class="f-meta">defectdojo</div>
+        <div class="f-desc">**Host:** `http://44.238.29.244:80/robots.txt`
+**Description:** `Server leaks inodes via ETags, header found with file /robots.txt, fields: 0x3629faa394d51:0 `
+**HTTP Method:** `GET`</div>
+
+      </td>
+      <td class="f-target">(see DefectDojo)</td>
+    </tr>
+    <tr>
+      <td><span class="sev" style="background:#7a8699">INFO</span></td>
+      <td>
+        <div class="f-title">&quot;robots.txt&quot; Retrieved but It Does Not Contain Any &#39;Disallow&#39; Entries (Which Is Odd). </div>
+        <div class="f-meta">defectdojo</div>
+        <div class="f-desc">**Host:** `http://44.238.29.244:80/robots.txt`
+**Description:** `&quot;robots.txt&quot; retrieved but it does not contain any &#39;disallow&#39; entries (which is odd).`
+**HTTP Method:** `GET`</div>
+
+      </td>
+      <td class="f-target">(see DefectDojo)</td>
+    </tr>
+    <tr>
+      <td><span class="sev" style="background:#7a8699">INFO</span></td>
+      <td>
+        <div class="f-title">Allowed HTTP Methods: OPTIONS, TRACE, GET, HEAD, POST  </div>
+        <div class="f-meta">defectdojo</div>
+        <div class="f-desc">**Host:** `http://44.238.29.244:80/`
+**Description:** `Allowed HTTP Methods: OPTIONS, TRACE, GET, HEAD, POST `
+**HTTP Method:** `OPTIONS`</div>
+
+      </td>
+      <td class="f-target">(see DefectDojo)</td>
+    </tr>
+    <tr>
+      <td><span class="sev" style="background:#7a8699">INFO</span></td>
+      <td>
+        <div class="f-title">Public HTTP Methods: OPTIONS, TRACE, GET, HEAD, POST  </div>
+        <div class="f-meta">defectdojo</div>
+        <div class="f-desc">**Host:** `http://44.238.29.244:80/`
+**Description:** `Public HTTP Methods: OPTIONS, TRACE, GET, HEAD, POST `
+**HTTP Method:** `OPTIONS`</div>
+
+      </td>
+      <td class="f-target">(see DefectDojo)</td>
+    </tr></tbody>
   </table>
 
   <footer>
-    Generated 2026-08-14T08:34:00.148Z by Cytadel Sentinel. Findings storage, dedupe, and triage are managed in DefectDojo.
-    This report covers only assets explicitly authorized in scope <strong>vulnweb-test</strong>
-    (TICKET-123).
+    Generated 2026-08-17T10:58:53.607Z by Cytadel Sentinel. Findings storage, dedupe, and triage are managed in DefectDojo.
+    This report covers only assets explicitly authorized in scope <strong>vulnweb-active</strong>
+    (acunetix-public-test-site).
   </footer>
 </div>
 </body>
