@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, test, expect } from "vitest";
 import { dalfoxPocToFinding } from "./dalfox.js";
+import { buildGenericFindingsDoc } from "./generic.js";
 import { parseJsonArrayLoose } from "../../lib/parse.js";
 import { parseGeneric } from "../normalize/parsers.js";
 
@@ -45,34 +46,29 @@ describe("dalfox partial capture — unterminated JSON array from a kill", () =>
     expect(ids.size).toBe(2);
   });
 
-  test("end-to-end: truncated dalfox output reaches report.json shape with 2 High XSS", () => {
-    // Mirror the real pipeline: parse PoCs -> GenericFinding -> the generic
-    // import file shape -> normalize's parseGeneric (what feeds report.json).
+  test("end-to-end: dalfox PoCs -> DD-clean generic doc -> report shows param + evidence", () => {
+    // Mirror the real pipeline through the ACTUAL doc builder: parse PoCs ->
+    // GenericFinding -> buildGenericFindingsDoc -> parseGeneric (feeds report).
     const pocs = parseJsonArrayLoose<Record<string, unknown>>(fixture("dalfox-truncated.json"));
     const findings = pocs.map(dalfoxPocToFinding);
 
-    const genericDoc = JSON.stringify({
-      findings: findings.map((f) => ({
-        title: f.title,
-        description: f.description,
-        severity: "High",
-        cwe: f.cwe,
-        file_path: f.endpoint,
-        unique_id_from_tool: f.uniqueId,
-        endpoints: [f.endpoint],
-        sentinel_tool: f.sourceTool,
-        sentinel_evidence: f.evidence ?? "",
-      })),
-    });
+    const doc = buildGenericFindingsDoc(findings);
+    // Fix A: NO custom sentinel_* keys anywhere in the DD import payload.
+    const keys = new Set(doc.findings.flatMap((f) => Object.keys(f)));
+    expect(keys.has("sentinel_tool")).toBe(false);
+    expect(keys.has("sentinel_evidence")).toBe(false);
 
-    const unified = parseGeneric(genericDoc, "dalfox");
+    const unified = parseGeneric(JSON.stringify(doc), "dalfox");
     expect(unified.length).toBe(2);
     for (const u of unified) {
       expect(u.severity).toBe("HIGH");
-      expect(u.sourceTool).toBe("dalfox");
+      expect(u.sourceTool).toBe("dalfox"); // from the artifact tool (fallback), not a custom key
       expect(u.target).toContain("/Search.asp");
+      // Fix B: the real param and the payload/evidence survive to the report.
       expect(u.name).toContain("tfSearch");
+      expect(u.name).not.toContain('parameter ""');
       expect(u.evidence).toBeTruthy();
+      expect(u.evidence).toContain("payload:");
     }
   });
 });

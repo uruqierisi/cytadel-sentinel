@@ -37,15 +37,29 @@ function today(): string {
 /**
  * Write a DefectDojo Generic Findings Import file. The same JSON is later read
  * by normalize/parseGeneric, so the shape here is the contract for both.
+ *
+ * IMPORTANT: DefectDojo's Generic Findings Import serializer has a strict field
+ * allowlist and rejects the whole import (HTTP 400 "Not allowed fields") if any
+ * unknown key is present. So we emit ONLY standard fields — no custom
+ * `sentinel_*` keys. The evidence (payload / technique / DBMS) is folded into the
+ * standard `description` so it survives to BOTH DefectDojo and our local parser;
+ * parseGeneric recovers evidence from `description` and the source tool from the
+ * artifact's tool name.
  */
-export async function writeGenericFindingsFile(
-  outPath: string,
-  findings: GenericFinding[],
-): Promise<void> {
-  const doc = {
+export interface GenericImportDoc {
+  findings: Array<Record<string, unknown>>;
+}
+
+/**
+ * Build the DefectDojo Generic Findings Import document — ONLY standard,
+ * allowlisted fields. Pure and testable (no fs). Kept separate so we can assert
+ * the payload carries no custom keys that would 400 the import.
+ */
+export function buildGenericFindingsDoc(findings: GenericFinding[]): GenericImportDoc {
+  return {
     findings: findings.map((f) => ({
       title: f.title,
-      description: f.description,
+      description: buildDescription(f),
       severity: SEVERITY_LABEL[f.severity],
       date: today(),
       cwe: f.cwe ?? undefined,
@@ -54,10 +68,18 @@ export async function writeGenericFindingsFile(
       dynamic_finding: true,
       static_finding: false,
       endpoints: [f.endpoint],
-      // Retained for our own Normalize parser (ignored by DefectDojo).
-      sentinel_tool: f.sourceTool,
-      sentinel_evidence: f.evidence ?? "",
     })),
   };
-  await writeFile(outPath, JSON.stringify(doc, null, 2), "utf8");
+}
+
+export async function writeGenericFindingsFile(
+  outPath: string,
+  findings: GenericFinding[],
+): Promise<void> {
+  await writeFile(outPath, JSON.stringify(buildGenericFindingsDoc(findings), null, 2), "utf8");
+}
+
+/** Fold evidence into the description so it reaches DefectDojo AND report.json. */
+function buildDescription(f: GenericFinding): string {
+  return [f.description, f.evidence ? `Evidence — ${f.evidence}` : ""].filter(Boolean).join("\n\n");
 }

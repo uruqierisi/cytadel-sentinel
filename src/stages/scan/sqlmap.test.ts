@@ -32,17 +32,25 @@ Parameter: id (GET)
 [*] shutting down @ 12:03:00
 `;
 
-describe("parseSqlmapStdout", () => {
-  test("extracts a confirmed injection point with its types", () => {
+describe("parseSqlmapStdout — one finding per confirmed injection point", () => {
+  test("one param with two Type blocks => two findings (per-technique)", () => {
     const findings = parseSqlmapStdout(SQLMAP_OUTPUT, URL);
-    expect(findings.length).toBe(1);
-    const f = findings[0]!;
-    expect(f.sourceTool).toBe("sqlmap");
-    expect(f.severity).toBe("HIGH");
-    expect(f.cwe).toBe(89);
-    expect(f.endpoint).toBe(URL);
-    expect(f.title).toContain('parameter "id"');
-    expect(f.evidence).toContain("boolean-based blind");
+    expect(findings.length).toBe(2);
+    for (const f of findings) {
+      expect(f.sourceTool).toBe("sqlmap");
+      expect(f.severity).toBe("HIGH");
+      expect(f.cwe).toBe(89);
+      expect(f.endpoint).toBe(URL);
+      expect(f.title).toContain('parameter "id"');
+    }
+    const titles = findings.map((f) => f.title).join(" | ");
+    expect(titles).toContain("boolean-based blind");
+    expect(titles).toContain("error-based");
+    // Each carries its own payload.
+    expect(findings[0]!.evidence).toContain("payload: id=0 AND 1234=1234");
+    expect(findings[1]!.evidence).toContain("payload: id=0 AND 5678=CONVERT(INT,...)");
+    // Distinct dedupe ids per technique.
+    expect(findings[0]!.uniqueId).not.toBe(findings[1]!.uniqueId);
   });
 
   test("returns nothing when sqlmap finds no injection", () => {
@@ -64,23 +72,57 @@ Parameter: cat (GET)
     const findings = parseSqlmapStdout(out, URL);
     expect(findings.length).toBe(2);
     expect(findings.map((f) => f.title).join(" ")).toContain("cat");
+    expect(findings.map((f) => f.title).join(" ")).toContain('parameter "id"');
   });
 
-  test("partial capture: sqlmap killed mid-block (no closing ---) still yields the injection point", () => {
-    // Real truncated sqlmap output: the second Type/Title is confirmed but the
-    // final Payload line was cut and there is no closing '---'. The end-of-input
-    // flush must still emit the parameter finding.
+  test("real Juice Shop block: q, boolean + time-based, SQLite, q=apple payloads", () => {
+    const out = `
+sqlmap identified the following injection point(s) with a total of 96 HTTP(s) requests:
+---
+Parameter: q (GET)
+    Type: boolean-based blind
+    Title: OR boolean-based blind - WHERE or HAVING clause
+    Payload: q=apple') OR 5539=5539 AND ('kUZU'='kUZU
+
+    Type: time-based blind
+    Title: SQLite > 2.0 AND time-based blind (heavy query)
+    Payload: q=apple') AND 1234=LIKE('ABCDEFG',UPPER(HEX(RANDOMBLOB(500000000)))) AND ('a'='a
+---
+[12:00:10] [INFO] the back-end DBMS is SQLite
+back-end DBMS: SQLite
+`;
+    const url = "http://127.0.0.1:3000/rest/products/search?q=apple";
+    const findings = parseSqlmapStdout(out, url);
+    expect(findings.length).toBe(2);
+    for (const f of findings) {
+      expect(f.severity).toBe("HIGH");
+      expect(f.endpoint).toBe(url); // the q=apple URL
+      expect(f.title).toContain('parameter "q"');
+      expect(f.evidence).toContain("q=apple"); // real payload value
+      expect(f.evidence).toContain("DBMS: SQLite");
+      expect(f.description).toContain("SQLite");
+      expect(f.description).toContain('parameter "q"');
+    }
+    expect(findings[0]!.title).toContain("boolean-based blind");
+    expect(findings[1]!.title).toContain("time-based blind");
+  });
+
+  test("partial capture: sqlmap killed mid-block (no closing ---) still yields the points", () => {
+    // Real truncated sqlmap output: two Type blocks confirmed but the final
+    // Payload line was cut and there is no closing '---'. The end-of-input flush
+    // must still emit BOTH injection points.
     const content = fixture("sqlmap-truncated.log");
     const findings = parseSqlmapStdout(content, URL);
-    expect(findings.length).toBe(1);
-    const f = findings[0]!;
-    expect(f.sourceTool).toBe("sqlmap");
-    expect(f.severity).toBe("HIGH");
-    expect(f.cwe).toBe(89);
-    expect(f.title).toContain('parameter "id"');
-    // Both confirmed types landed before the cut.
-    expect(f.evidence).toContain("boolean-based blind");
-    expect(f.evidence).toContain("error-based");
+    expect(findings.length).toBe(2);
+    for (const f of findings) {
+      expect(f.sourceTool).toBe("sqlmap");
+      expect(f.severity).toBe("HIGH");
+      expect(f.cwe).toBe(89);
+      expect(f.title).toContain('parameter "id"');
+    }
+    const titles = findings.map((f) => f.title).join(" | ");
+    expect(titles).toContain("boolean-based blind");
+    expect(titles).toContain("error-based");
   });
 });
 
@@ -160,37 +202,5 @@ describe("planSqlmapInvocations — one isolated invocation per signature", () =
     expect(args[args.indexOf("-u") + 1]).toBe(seed);
     expect(args.join(" ")).toContain("q=apple");
     expect(args.join(" ")).not.toContain("q=1");
-  });
-});
-
-describe("parseSqlmapStdout — captures technique AND payload for the report", () => {
-  const URL_APPLE = "http://127.0.0.1:3000/rest/products/search?q=apple";
-  const OUT = `
-sqlmap identified the following injection point(s):
----
-Parameter: q (GET)
-    Type: boolean-based blind
-    Title: AND boolean-based blind - WHERE or HAVING clause
-    Payload: q=apple') AND 1234=1234 AND ('abcd'='abcd
-
-    Type: time-based blind
-    Title: SQLite > 2.0 AND time-based blind (heavy query)
-    Payload: q=apple') AND 1234=RANDOMBLOB(100000000) AND ('a'='a
----
-`;
-
-  test("finding carries param, endpoint, technique and payload", () => {
-    const findings = parseSqlmapStdout(OUT, URL_APPLE);
-    expect(findings.length).toBe(1);
-    const f = findings[0]!;
-    expect(f.endpoint).toBe(URL_APPLE); // the q=apple URL, not q=1
-    expect(f.title).toContain('parameter "q"');
-    expect(f.severity).toBe("HIGH");
-    expect(f.evidence).toContain("technique:");
-    expect(f.evidence).toContain("boolean-based blind");
-    expect(f.evidence).toContain("time-based blind");
-    expect(f.evidence).toContain("payload:");
-    expect(f.evidence).toContain("q=apple");
-    expect(f.description).toContain("q=apple");
   });
 });

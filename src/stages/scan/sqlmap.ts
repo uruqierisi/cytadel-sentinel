@@ -185,63 +185,121 @@ export function planSqlmapInvocations(
 }
 
 /**
- * Parse sqlmap stdout for confirmed injection points. sqlmap prints blocks like:
- *   Parameter: id (GET)
+ * Parse sqlmap STDOUT (the authoritative source — detection results go to stdout
+ * + session.sqlite, NOT the --output-dir results CSV, which only fills during
+ * --dump enumeration). sqlmap prints, after "sqlmap identified the following
+ * injection point(s)":
+ *
+ *   Parameter: q (GET)
  *       Type: boolean-based blind
  *       Title: AND boolean-based blind - WHERE or HAVING clause
- *       Payload: id=1 AND 1234=1234
+ *       Payload: q=apple') AND 1234=1234 AND ('abcd'='abcd
+ *
+ *       Type: time-based blind
+ *       Title: SQLite > 2.0 AND time-based blind
+ *       Payload: q=apple') AND 1234=RANDOMBLOB(...) AND ('a'='a
+ *   ---
+ *   back-end DBMS: SQLite
+ *
+ * ONE finding per confirmed injection point (per Type block) — a parameter with
+ * boolean-based AND time-based blind yields two High findings. Partial capture:
+ * if sqlmap is killed mid-block, whatever Type/Title/Payload already printed is
+ * still emitted.
  */
+interface SqlmapBlock {
+  type: string;
+  title: string | null;
+  payload: string | null;
+}
+
 export function parseSqlmapStdout(stdout: string, url: string): GenericFinding[] {
   const lines = stdout.split(/\r?\n/);
-  const findings: GenericFinding[] = [];
-  let current: { param: string; method: string; types: string[]; titles: string[]; payloads: string[] } | null = null;
 
-  const flush = (): void => {
-    if (!current) return;
-    // Evidence carries the confirmed technique(s) AND the concrete payload(s) so
-    // the report is actionable and reproducible.
-    const parts: string[] = [];
-    if (current.titles.length) parts.push(`technique: ${current.titles.join("; ")}`);
-    else if (current.types.length) parts.push(`technique: ${current.types.join("; ")}`);
-    if (current.payloads.length) parts.push(`payload: ${current.payloads.join(" | ")}`);
-    findings.push({
-      sourceTool: "sqlmap",
-      title: `SQL injection on parameter "${current.param}" (${current.method})`,
-      description:
-        `sqlmap confirmed SQL injection on parameter "${current.param}". ` +
-        `Types: ${current.types.join(", ") || "unknown"}.` +
-        (current.payloads.length ? ` Payload: ${current.payloads[0]}.` : ""),
-      severity: "HIGH",
-      cwe: 89,
-      endpoint: url,
-      uniqueId: createHash("sha256").update(`sqlmap|${url}|${current.param}`).digest("hex").slice(0, 32),
-      evidence: parts.length ? parts.join(" — ") : null,
-    });
-    current = null;
+  // back-end DBMS is target-wide; last stated value wins.
+  let dbms: string | null = null;
+  for (const raw of lines) {
+    const m = raw.match(/back-end DBMS:\s*(.+?)\s*$/i);
+    if (m) dbms = m[1]!.trim();
+  }
+
+  const findings: GenericFinding[] = [];
+  let param: string | null = null;
+  let place: string | null = null;
+  let block: SqlmapBlock | null = null;
+
+  const emit = (): void => {
+    // Emit as soon as we have a parameter and at least a Type or Payload — this
+    // is what keeps a killed-mid-block run from losing the confirmed point.
+    if (!param || !block || (!block.type && !block.payload)) {
+      block = null;
+      return;
+    }
+    findings.push(makeSqlmapFinding(url, param, place, block, dbms));
+    block = null;
   };
 
   for (const raw of lines) {
     const line = raw.trim();
-    const paramMatch = line.match(/^Parameter:\s*(.+?)\s*\((GET|POST|COOKIE|HEADER|URI)\)/i);
+
+    const paramMatch = line.match(/^Parameter:\s*(.+?)\s*\(([^)]+)\)\s*$/i);
     if (paramMatch) {
-      flush();
-      current = { param: paramMatch[1]!, method: paramMatch[2]!.toUpperCase(), types: [], titles: [], payloads: [] };
+      emit();
+      param = paramMatch[1]!.trim();
+      place = paramMatch[2]!.trim().toUpperCase();
       continue;
     }
-    if (current) {
-      const typeMatch = line.match(/^Type:\s*(.+)$/i);
-      if (typeMatch) current.types.push(typeMatch[1]!);
+    if (!param) continue;
+
+    const typeMatch = line.match(/^Type:\s*(.+)$/i);
+    if (typeMatch) {
+      emit(); // a new Type closes the previous block
+      block = { type: typeMatch[1]!.trim(), title: null, payload: null };
+      continue;
+    }
+    if (block) {
       const titleMatch = line.match(/^Title:\s*(.+)$/i);
-      if (titleMatch) current.titles.push(titleMatch[1]!);
+      if (titleMatch) {
+        block.title = titleMatch[1]!.trim();
+        continue;
+      }
       const payloadMatch = line.match(/^Payload:\s*(.+)$/i);
-      if (payloadMatch) current.payloads.push(payloadMatch[1]!);
-      // A separator or blank line after a block ends the current parameter.
-      if (line === "---" || line === "") {
-        // keep accumulating across blank lines within a block; "---" ends it.
-        if (line === "---") flush();
+      if (payloadMatch) {
+        block.payload = payloadMatch[1]!.trim();
+        continue;
       }
     }
   }
-  flush();
+  emit();
   return findings;
+}
+
+function makeSqlmapFinding(
+  url: string,
+  param: string,
+  place: string | null,
+  block: SqlmapBlock,
+  dbms: string | null,
+): GenericFinding {
+  const technique = block.type || "SQL injection";
+  const evidenceParts: string[] = [`technique: ${block.title || technique}`];
+  if (block.payload) evidenceParts.push(`payload: ${block.payload}`);
+  if (dbms) evidenceParts.push(`DBMS: ${dbms}`);
+
+  const description =
+    `sqlmap confirmed ${technique} SQL injection on parameter "${param}"` +
+    `${place ? ` (${place})` : ""}${dbms ? ` — back-end DBMS: ${dbms}` : ""}.` +
+    (block.payload ? ` Payload: ${block.payload}.` : "");
+
+  return {
+    sourceTool: "sqlmap",
+    title: `SQL Injection (${technique}) on parameter "${param}"`,
+    description,
+    severity: "HIGH",
+    cwe: 89,
+    endpoint: url,
+    // Include the technique so boolean-based and time-based on the same param
+    // stay distinct through dedupe.
+    uniqueId: createHash("sha256").update(`sqlmap|${url}|${param}|${technique}`).digest("hex").slice(0, 32),
+    evidence: evidenceParts.join(" — "),
+  };
 }
