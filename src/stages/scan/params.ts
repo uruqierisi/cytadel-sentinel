@@ -41,3 +41,29 @@ export function dedupeParamSignatures(urls: string[], cap: number): string[] {
   }
   return out;
 }
+
+export interface InjectionTargetPlan {
+  /** Final deduped, capped injection signatures fed to sqlmap/dalfox. */
+  targets: string[];
+  /** How many final targets came from scope seed_param_urls. */
+  fromSeeds: number;
+  /** How many came from recon discovery. */
+  fromDiscovery: number;
+}
+
+/**
+ * Merge scope SEED param URLs (already scope-gated + payload-cleaned) with
+ * recon-discovered param URLs, then dedupe by signature and cap. Seeds go FIRST
+ * so a known-vulnerable endpoint (e.g. Juice Shop /rest/products/search?q=)
+ * always survives the cap and reaches the scanners. Pure and testable.
+ */
+export function planInjectionTargets(
+  gatedCleanSeeds: string[],
+  discoveredParamUrls: string[],
+  cap: number,
+): InjectionTargetPlan {
+  const targets = dedupeParamSignatures([...gatedCleanSeeds, ...discoveredParamUrls], cap);
+  const seedSigs = new Set(gatedCleanSeeds.map((u) => paramSignature(u) ?? u));
+  const fromSeeds = targets.filter((u) => seedSigs.has(paramSignature(u) ?? u)).length;
+  return { targets, fromSeeds, fromDiscovery: targets.length - fromSeeds };
+}

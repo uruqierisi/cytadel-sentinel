@@ -43,3 +43,10 @@ rate_limit_rps: 10
 # Destructive checks (stacked SQLi, write/delete payloads) stay OFF unless this
 # is true AND the CLI is invoked with --allow-destructive. Both gates required.
 allow_destructive: false
+
+# Known param URLs to inject DIRECTLY, bypassing recon discovery. Use this for
+# SPAs/APIs whose client-side or API routes katana/gau can't crawl (so they never
+# reach sqlmap/dalfox otherwise), e.g. Juice Shop's search API. Each URL is still
+# scope-gated, payload-cleaned, and signature-deduped like a discovered one.
+# seed_param_urls:
+#   - "http://127.0.0.1:3000/rest/products/search?q=apple"

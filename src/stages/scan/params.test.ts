@@ -1,5 +1,8 @@
 import { describe, test, expect } from "vitest";
-import { paramSignature, dedupeParamSignatures } from "./params.js";
+import { paramSignature, dedupeParamSignatures, planInjectionTargets } from "./params.js";
+import { ScopeSchema } from "../../config/schema.js";
+import { isInScope } from "../../config/inScope.js";
+import { cleanParamUrls } from "../recon/paramClean.js";
 
 describe("paramSignature — ignore values, key on path + param names", () => {
   test("same path + param name, different values => same signature", () => {
@@ -71,5 +74,64 @@ describe("dedupeParamSignatures — collapse the 183 (fix 2/4)", () => {
       25,
     );
     expect(deduped).toEqual(["http://testasp.vulnweb.com/x.asp?a=1"]);
+  });
+});
+
+describe("planInjectionTargets — seed_param_urls reach the scanners", () => {
+  const SEARCH_SIG = "http://127.0.0.1:3000/rest/products/search?q";
+
+  // Mirror the scan orchestrator: scope seeds -> payload clean -> scope gate ->
+  // merge with discovery -> dedupe. This is the SPA/API coverage gap fix.
+  function injectionSignaturesFor(scopeInput: unknown, discovered: string[] = []): string[] {
+    const scope = ScopeSchema.parse(scopeInput);
+    const { urls: cleanSeeds } = cleanParamUrls(scope.seed_param_urls);
+    const gatedSeeds = cleanSeeds.filter((u) => isInScope(scope, u));
+    const { targets } = planInjectionTargets(gatedSeeds, discovered, 25);
+    return targets.map((u) => paramSignature(u) ?? u);
+  }
+
+  const juiceShopScope = {
+    name: "juice-shop",
+    authorized_by: "me",
+    authorization_ref: "LOCAL",
+    in_scope: { domains: ["127.0.0.1"] },
+    allow_destructive: true,
+    seed_param_urls: ["http://127.0.0.1:3000/rest/products/search?q=apple"],
+  };
+
+  test("a seeded /rest/products/search?q= produces an injection signature for it", () => {
+    const sigs = injectionSignaturesFor(juiceShopScope);
+    expect(sigs).toContain(SEARCH_SIG);
+  });
+
+  test("seeds survive the cap even behind lots of discovered params (seeds go first)", () => {
+    const discovered = Array.from({ length: 100 }, (_, i) => `http://127.0.0.1:3000/p${i}.asp?x=${i}`);
+    const { targets, fromSeeds, fromDiscovery } = planInjectionTargets(
+      ["http://127.0.0.1:3000/rest/products/search?q=apple"],
+      discovered,
+      25,
+    );
+    expect(targets.length).toBe(25);
+    expect(fromSeeds).toBe(1);
+    expect(fromDiscovery).toBe(24);
+    expect(targets.map((u) => paramSignature(u)).includes(SEARCH_SIG)).toBe(true);
+  });
+
+  test("an out-of-scope seed is gated out and does not appear", () => {
+    const sigs = injectionSignaturesFor({
+      ...juiceShopScope,
+      seed_param_urls: ["http://evil.example.com/rest/products/search?q=apple"],
+    });
+    expect(sigs).not.toContain("http://evil.example.com/rest/products/search?q");
+    expect(sigs.length).toBe(0);
+  });
+
+  test("a payload-laden seed is cleaned to a neutral value (q=1, not the attack string)", () => {
+    const sigs = injectionSignaturesFor({
+      ...juiceShopScope,
+      // clean value; normalization turns q=apple -> q=1 for a working request
+      seed_param_urls: ["http://127.0.0.1:3000/rest/products/search?q=apple"],
+    });
+    expect(sigs).toEqual([SEARCH_SIG]);
   });
 });

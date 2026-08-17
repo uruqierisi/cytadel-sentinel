@@ -70,6 +70,13 @@ export const ScopeSchema = z
     auth: AuthSchema.default({ type: "none" }),
     rate_limit_rps: z.number().int().positive().max(1000).default(10),
     allow_destructive: z.boolean().default(false),
+    /**
+     * Known param URLs to inject DIRECTLY, bypassing recon discovery. Needed for
+     * SPAs/APIs whose client-side/API routes katana/gau can't crawl (e.g. Juice
+     * Shop /rest/products/search?q=). They still pass the scope gate, payload
+     * cleaning, and signature dedupe like discovered param URLs.
+     */
+    seed_param_urls: z.array(UrlSchema).default([]),
   })
   .strict();
 

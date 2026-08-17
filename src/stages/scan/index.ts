@@ -5,7 +5,8 @@ import { gate, type RunContext } from "../../core/context.js";
 import type { ReconResult } from "../recon/index.js";
 import type { ScanArtifact } from "./artifacts.js";
 import { buildNucleiTargets } from "./targets.js";
-import { dedupeParamSignatures, paramSignature } from "./params.js";
+import { paramSignature, planInjectionTargets } from "./params.js";
+import { cleanParamUrls } from "../recon/paramClean.js";
 import { runNuclei } from "./nuclei.js";
 import { runTestssl } from "./testssl.js";
 import { runNikto } from "./nikto.js";
@@ -97,15 +98,31 @@ export async function runScan(ctx: RunContext, recon: ReconResult): Promise<Scan
   // destructive gate. When closed (default) we skip silently; the DESTRUCTIVE_GATE
   // audit event above already records the decision, and the report notes it.
   if (ctx.allowDestructive) {
-    // Collapse the raw param URLs to distinct injection SIGNATURES exactly ONCE,
-    // then hand the SAME capped list to both tools. dalfox and sqlmap must run
-    // over the identical ~7-25 deduped signatures — never the raw hundreds — or
-    // they burn their whole time budget on duplicate id= params and get killed
-    // before reaching the interesting ones (e.g. Search.asp?tfSearch).
-    const injectionTargets = dedupeParamSignatures(recon.paramUrls, LIMITS.maxInjectionTargets);
+    // Seed param URLs bypass recon discovery (SPAs/APIs katana/gau can't crawl,
+    // e.g. Juice Shop /rest/products/search?q=). They still get scope-gated,
+    // payload-cleaned, and deduped exactly like discovered ones. Seeds go FIRST
+    // so they always survive the maxInjectionTargets cap.
+    const seedCandidates = ctx.scope.seed_param_urls ?? [];
+    const { urls: cleanSeeds } = cleanParamUrls(seedCandidates);
+    const gatedSeeds: string[] = [];
+    for (const u of cleanSeeds) {
+      if ((await gate(ctx, u)).allowed) gatedSeeds.push(u);
+    }
+
+    // Collapse the merged param URLs to distinct injection SIGNATURES exactly
+    // ONCE, then hand the SAME capped list to both tools. dalfox and sqlmap must
+    // run over the identical ~7-25 deduped signatures — never the raw hundreds —
+    // or they burn their budget before reaching the interesting ones.
+    const { targets: injectionTargets, fromSeeds, fromDiscovery } = planInjectionTargets(
+      gatedSeeds,
+      recon.paramUrls,
+      LIMITS.maxInjectionTargets,
+    );
+
     ctx.bus.stageProgress(
       "scan",
-      `active injection over ${injectionTargets.length} deduped signature(s) (from ${recon.paramUrls.length} param URL(s))`,
+      `active injection over ${injectionTargets.length} deduped signature(s) ` +
+        `(${fromSeeds} seed · ${fromDiscovery} discovered)`,
       false,
     );
     // Log the FINAL signature list (path + param names) both tools will fuzz, so
@@ -113,8 +130,12 @@ export async function runScan(ctx: RunContext, recon: ReconResult): Promise<Scan
     const signatureLabels = injectionTargets.map((u) => paramSignature(u) ?? u);
     ctx.log.info(
       {
+        seedParamUrls: seedCandidates.length,
+        gatedSeeds: gatedSeeds.length,
         rawParamUrls: recon.paramUrls.length,
         injectionTargets: injectionTargets.length,
+        fromSeeds,
+        fromDiscovery,
         cap: LIMITS.maxInjectionTargets,
         signatures: signatureLabels,
       },
