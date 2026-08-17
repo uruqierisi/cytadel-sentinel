@@ -5,6 +5,8 @@ import { evaluateScope } from "../../config/inScope.js";
 import { LIMITS } from "../../config/limits.js";
 import { subfinder, httpx, katana, gau, waybackurls, naabu, type HttpxResult } from "./tools.js";
 import { sanitizeDiscoveredUrls, capEndpointsPerHost } from "./sanitize.js";
+import { cleanParamUrls } from "./paramClean.js";
+import { paramSignature } from "../scan/params.js";
 
 /**
  * Recon stage.
@@ -183,7 +185,28 @@ export async function runRecon(ctx: RunContext): Promise<ReconResult> {
 
   const endpointSet = new Set<string>([...cappedNonJs, ...cappedJs]);
   const jsSet = new Set<string>(cappedJs);
-  const paramSet = new Set<string>(cappedNonJs.filter((u) => HAS_PARAM.test(u)));
+
+  // Injection candidates: keep only param URLs whose VALUES are real values, not
+  // archived attack payloads (wayback poisoning), then normalize each to a CLEAN
+  // representative (id=1) BEFORE signature dedupe downstream. This keeps
+  // sqlmap/dalfox pointed at the real params instead of junk.
+  const paramCandidates = cappedNonJs.filter((u) => HAS_PARAM.test(u));
+  const { urls: cleanParams, stats: paramStats } = cleanParamUrls(paramCandidates);
+  if (paramStats.droppedPayload > 0) {
+    ctx.log.warn({ ...paramStats }, "recon: dropped payload-laden (wayback-poisoned) param URLs");
+    ctx.bus.stageProgress(
+      "recon",
+      `dropped ${paramStats.droppedPayload} payload-laden param URL(s) · ${paramStats.kept} clean param signature(s)`,
+      true,
+    );
+  }
+  const paramSet = new Set<string>(cleanParams);
+  // Log the final param signatures (path + names) so we can confirm the real
+  // injectable endpoints (showforum.asp?id=, Search.asp?tfSearch=) are present.
+  ctx.log.info(
+    { paramSignatures: [...paramSet].map((u) => paramSignature(u) ?? u) },
+    "recon: clean injection param signatures",
+  );
 
   for (const u of endpointSet) await persistSimple(ctx, "ENDPOINT", u);
   for (const j of jsSet) await persistSimple(ctx, "JS_ASSET", j);

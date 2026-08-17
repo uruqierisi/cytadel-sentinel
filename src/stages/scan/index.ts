@@ -5,7 +5,7 @@ import { gate, type RunContext } from "../../core/context.js";
 import type { ReconResult } from "../recon/index.js";
 import type { ScanArtifact } from "./artifacts.js";
 import { buildNucleiTargets } from "./targets.js";
-import { dedupeParamSignatures } from "./params.js";
+import { dedupeParamSignatures, paramSignature } from "./params.js";
 import { runNuclei } from "./nuclei.js";
 import { runTestssl } from "./testssl.js";
 import { runNikto } from "./nikto.js";
@@ -108,10 +108,19 @@ export async function runScan(ctx: RunContext, recon: ReconResult): Promise<Scan
       `active injection over ${injectionTargets.length} deduped signature(s) (from ${recon.paramUrls.length} param URL(s))`,
       false,
     );
+    // Log the FINAL signature list (path + param names) both tools will fuzz, so
+    // we can confirm the real injectable endpoints are actually reached.
+    const signatureLabels = injectionTargets.map((u) => paramSignature(u) ?? u);
     ctx.log.info(
-      { rawParamUrls: recon.paramUrls.length, injectionTargets: injectionTargets.length, cap: LIMITS.maxInjectionTargets },
+      {
+        rawParamUrls: recon.paramUrls.length,
+        injectionTargets: injectionTargets.length,
+        cap: LIMITS.maxInjectionTargets,
+        signatures: signatureLabels,
+      },
       "scan: active-injection targets (shared by dalfox + sqlmap)",
     );
+    ctx.bus.stageProgress("scan", `injection signatures: ${signatureLabels.join(" · ")}`, true);
     const dalfoxArtifact = await runDalfox(ctx, injectionTargets);
     if (dalfoxArtifact) artifacts.push(dalfoxArtifact);
     const sqlmapArtifact = await runSqlmap(ctx, injectionTargets);
