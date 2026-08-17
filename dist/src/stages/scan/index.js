@@ -3,6 +3,7 @@ import { ensureRunDirs } from "../../lib/paths.js";
 import { LIMITS } from "../../config/limits.js";
 import { gate } from "../../core/context.js";
 import { buildNucleiTargets } from "./targets.js";
+import { paramSignature, planInjectionTargets } from "./params.js";
 import { runNuclei } from "./nuclei.js";
 import { runTestssl } from "./testssl.js";
 import { runNikto } from "./nikto.js";
@@ -71,11 +72,46 @@ export async function runScan(ctx, recon) {
     // destructive gate. When closed (default) we skip silently; the DESTRUCTIVE_GATE
     // audit event above already records the decision, and the report notes it.
     if (ctx.allowDestructive) {
-        ctx.bus.stageProgress("scan", `active injection over ${recon.paramUrls.length} param URL(s)`, false);
-        const dalfoxArtifact = await runDalfox(ctx, recon.paramUrls);
+        // Seed param URLs bypass recon discovery (SPAs/APIs katana/gau can't crawl,
+        // e.g. Juice Shop /rest/products/search?q=). They are scope-gated but their
+        // VALUES are PRESERVED verbatim — a user who seeds ?q=apple means "fuzz
+        // apple": sqlmap's boolean/time-based blind needs a value that returns real
+        // results to stabilize, and normalizing to ?q=1 breaks detection. (Discovered
+        // params keep normalization — their risk is archived attack payloads; seeds
+        // are user-authored and intentional.) Dedupe still collapses same-signature
+        // seeds via planInjectionTargets, keeping the first real value. Seeds go
+        // FIRST so they always survive the maxInjectionTargets cap.
+        const seedCandidates = ctx.scope.seed_param_urls ?? [];
+        const gatedSeeds = [];
+        for (const u of seedCandidates) {
+            if ((await gate(ctx, u)).allowed)
+                gatedSeeds.push(u);
+        }
+        // Collapse the merged param URLs to distinct injection SIGNATURES exactly
+        // ONCE, then hand the SAME capped list to both tools. dalfox and sqlmap must
+        // run over the identical ~7-25 deduped signatures — never the raw hundreds —
+        // or they burn their budget before reaching the interesting ones.
+        const { targets: injectionTargets, fromSeeds, fromDiscovery } = planInjectionTargets(gatedSeeds, recon.paramUrls, LIMITS.maxInjectionTargets);
+        ctx.bus.stageProgress("scan", `active injection over ${injectionTargets.length} deduped signature(s) ` +
+            `(${fromSeeds} seed · ${fromDiscovery} discovered)`, false);
+        // Log the FINAL signature list (path + param names) both tools will fuzz, so
+        // we can confirm the real injectable endpoints are actually reached.
+        const signatureLabels = injectionTargets.map((u) => paramSignature(u) ?? u);
+        ctx.log.info({
+            seedParamUrls: seedCandidates.length,
+            gatedSeeds: gatedSeeds.length,
+            rawParamUrls: recon.paramUrls.length,
+            injectionTargets: injectionTargets.length,
+            fromSeeds,
+            fromDiscovery,
+            cap: LIMITS.maxInjectionTargets,
+            signatures: signatureLabels,
+        }, "scan: active-injection targets (shared by dalfox + sqlmap)");
+        ctx.bus.stageProgress("scan", `injection signatures: ${signatureLabels.join(" · ")}`, true);
+        const dalfoxArtifact = await runDalfox(ctx, injectionTargets);
         if (dalfoxArtifact)
             artifacts.push(dalfoxArtifact);
-        const sqlmapArtifact = await runSqlmap(ctx, recon.paramUrls);
+        const sqlmapArtifact = await runSqlmap(ctx, injectionTargets);
         if (sqlmapArtifact)
             artifacts.push(sqlmapArtifact);
     }

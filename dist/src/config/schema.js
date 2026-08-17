@@ -3,13 +3,21 @@ import { z } from "zod";
  * Zod schema for a scope file. Validation happens at the system boundary
  * (load time) — nothing downstream trusts an unvalidated scope.
  */
-const domainPattern = /^(\*\.)?([a-z0-9-]+\.)+[a-z]{2,}$/i;
+// FQDN, optionally wildcarded: "example.com" / "*.example.com".
+const fqdnPattern = /^(\*\.)?([a-z0-9-]+\.)+[a-z]{2,}$/i;
+// Bare IPv4 with each octet 0-255: "127.0.0.1", "10.0.0.5", "192.168.1.20".
+const ipv4Octet = "(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)";
+const ipv4Pattern = new RegExp(`^${ipv4Octet}(\\.${ipv4Octet}){3}$`);
+/** Accept an FQDN/wildcard, "localhost", or a bare IPv4 address (local lab testing). */
+export function isValidScopeDomain(d) {
+    return d === "localhost" || fqdnPattern.test(d) || ipv4Pattern.test(d);
+}
 const DomainSchema = z
     .string()
     .trim()
     .toLowerCase()
-    .refine((d) => domainPattern.test(d), {
-    message: 'invalid domain (use "example.com" or wildcard "*.example.com")',
+    .refine(isValidScopeDomain, {
+    message: 'invalid domain (use "example.com", wildcard "*.example.com", "localhost", or an IPv4 like "127.0.0.1")',
 });
 const UrlSchema = z
     .string()
@@ -54,6 +62,13 @@ export const ScopeSchema = z
     auth: AuthSchema.default({ type: "none" }),
     rate_limit_rps: z.number().int().positive().max(1000).default(10),
     allow_destructive: z.boolean().default(false),
+    /**
+     * Known param URLs to inject DIRECTLY, bypassing recon discovery. Needed for
+     * SPAs/APIs whose client-side/API routes katana/gau can't crawl (e.g. Juice
+     * Shop /rest/products/search?q=). They still pass the scope gate, payload
+     * cleaning, and signature dedupe like discovered param URLs.
+     */
+    seed_param_urls: z.array(UrlSchema).default([]),
 })
     .strict();
 //# sourceMappingURL=schema.js.map

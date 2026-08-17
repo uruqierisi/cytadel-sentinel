@@ -62,4 +62,97 @@ export function parseJsonLoose(stdout) {
         return parseJsonl(trimmed);
     }
 }
+/**
+ * Extract every COMPLETE top-level `{...}` object from a string, ignoring any
+ * surrounding array brackets and any truncated trailing object.
+ *
+ * This scans brace depth while respecting JSON strings/escapes, so braces inside
+ * string values don't confuse it and nested objects/arrays are handled. A tool
+ * killed mid-stream leaves its final object unterminated (depth never returns to
+ * 0) — that object is simply dropped, and every complete object emitted before
+ * the cut is returned. This is the robust core of partial-capture parsing for
+ * JSON-array output formats (e.g. `dalfox --format json`).
+ */
+export function parseJsonObjects(input) {
+    const out = [];
+    let depth = 0;
+    let start = -1;
+    let inStr = false;
+    let esc = false;
+    for (let i = 0; i < input.length; i++) {
+        const ch = input[i];
+        if (inStr) {
+            if (esc)
+                esc = false;
+            else if (ch === "\\")
+                esc = true;
+            else if (ch === '"')
+                inStr = false;
+            continue;
+        }
+        if (ch === '"') {
+            inStr = true;
+        }
+        else if (ch === "{") {
+            if (depth === 0)
+                start = i;
+            depth++;
+        }
+        else if (ch === "}") {
+            if (depth > 0) {
+                depth--;
+                if (depth === 0 && start >= 0) {
+                    try {
+                        out.push(JSON.parse(input.slice(start, i + 1)));
+                    }
+                    catch {
+                        // A malformed complete-looking block is skipped, not fatal.
+                    }
+                    start = -1;
+                }
+            }
+        }
+    }
+    return out;
+}
+/**
+ * Parse a JSON ARRAY that may be UNTERMINATED because the emitting tool was
+ * killed mid-write (SIGTERM at a timeout). Strategy, in order:
+ *   1. Strict parse — a complete array or single object.
+ *   2. Repair a truncated array: drop any trailing comma/whitespace and append
+ *      the missing "]", then parse. Recovers the common case where the array's
+ *      objects are all complete and only the closing bracket is missing.
+ *   3. Object-by-object extraction — the robust fallback that also recovers when
+ *      the cut landed in the MIDDLE of the final object.
+ *
+ * Any complete objects emitted before the cut MUST survive. Returns [] only when
+ * there is genuinely nothing parseable.
+ */
+export function parseJsonArrayLoose(input) {
+    const trimmed = input.trim();
+    if (!trimmed)
+        return [];
+    // 1) Strict.
+    try {
+        const doc = JSON.parse(trimmed);
+        return Array.isArray(doc) ? doc : [doc];
+    }
+    catch {
+        /* fall through */
+    }
+    // 2) Repair a truncated array by closing it.
+    if (trimmed.startsWith("[")) {
+        const repaired = trimmed.replace(/,?\s*$/, "") + "]";
+        try {
+            const doc = JSON.parse(repaired);
+            if (Array.isArray(doc))
+                return doc;
+        }
+        catch {
+            /* fall through */
+        }
+    }
+    // 3) Object-by-object (recovers a mid-object truncation too).
+    return parseJsonObjects(trimmed);
+}
 //# sourceMappingURL=parse.js.map

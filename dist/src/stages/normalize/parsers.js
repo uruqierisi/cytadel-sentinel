@@ -77,6 +77,11 @@ export function parseRetire(content) {
  * Parse the DefectDojo "Generic Findings Import" JSON that the active-injection
  * tools emit (see stages/scan/generic.ts). The same file feeds both DefectDojo
  * and this parser, so the shape is the shared contract.
+ *
+ * The file now carries ONLY DefectDojo-allowed fields (no custom `sentinel_*`
+ * keys, which caused a 400). The source tool comes from `fallbackTool` (the
+ * artifact's tool) and evidence from the standard `description` — the older
+ * `sentinel_tool`/`sentinel_evidence` reads remain only for backward compat.
  */
 export function parseGeneric(content, fallbackTool) {
     let doc;

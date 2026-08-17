@@ -67,6 +67,7 @@ scope
         console.log(`  auth:              ${s.auth.type}${s.auth.session ? ` (env ${s.auth.session})` : ""}`);
         console.log(`  rate_limit_rps:    ${s.rate_limit_rps}`);
         console.log(`  allow_destructive: ${s.allow_destructive}`);
+        console.log(`  seed_param_urls:   ${s.seed_param_urls.length ? s.seed_param_urls.join(", ") : "(none)"}`);
         // Show a couple of sample gate decisions so intent is obvious.
         console.log("\n  sample scope-gate decisions:");
         const samples = [

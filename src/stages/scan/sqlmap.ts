@@ -1,4 +1,5 @@
 import path from "node:path";
+import { mkdir, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { run } from "../../lib/exec.js";
 import { audit } from "../../lib/audit.js";
@@ -7,8 +8,20 @@ import { LIMITS } from "../../config/limits.js";
 import { startHeartbeat } from "../../lib/progress.js";
 import { gate, type RunContext } from "../../core/context.js";
 import { resolveSqlmap } from "./resolve.js";
+import { readSqlmapSessionFindings } from "./sqlmapSession.js";
 import { writeGenericFindingsFile, type GenericFinding } from "./generic.js";
 import type { ScanArtifact } from "./artifacts.js";
+
+/** Persist the raw captured stdout/stderr next to the run's output for inspection. */
+async function persistRawOutput(outDir: string, stdout: string, stderr: string): Promise<void> {
+  try {
+    await mkdir(outDir, { recursive: true });
+    await writeFile(path.join(outDir, "sentinel-stdout.txt"), stdout, "utf8");
+    if (stderr) await writeFile(path.join(outDir, "sentinel-stderr.txt"), stderr, "utf8");
+  } catch {
+    // Non-fatal: raw persistence is a diagnostic aid, not required for findings.
+  }
+}
 
 /**
  * sqlmap — active SQL injection. DESTRUCTIVE: only invoked when the destructive
@@ -88,7 +101,35 @@ export async function runSqlmap(ctx: RunContext, signatures: string[]): Promise<
           tolerateTimeout: true,
           timeoutMs: cfg.targetTimeoutMs,
         });
-        findings.push(...parseSqlmapStdout(res.stdout, inv.url));
+
+        // The injection block ("sqlmap identified the following injection
+        // point(s)" + Parameter/Type/Title/Payload) prints to stdout; some log
+        // lines (incl. "back-end DBMS") can land on stderr. Parse BOTH streams so
+        // capture never silently misses the detection. Log lengths so an empty
+        // capture is visible in the logs.
+        const captured = `${res.stdout ?? ""}\n${res.stderr ?? ""}`;
+        ctx.log.info(
+          { url: inv.url, stdoutLen: (res.stdout ?? "").length, stderrLen: (res.stderr ?? "").length },
+          "scan: sqlmap captured output",
+        );
+        await persistRawOutput(inv.outDir, res.stdout ?? "", res.stderr ?? "");
+
+        let targetFindings = parseSqlmapStdout(captured, inv.url);
+
+        // Fallback: if stdout/stderr yielded nothing, the detection may still be
+        // in session.sqlite (sqlmap serializes confirmed injections there even
+        // when the log/CSV are empty). Recover from it.
+        if (targetFindings.length === 0) {
+          const fromSession = await readSqlmapSessionFindings(inv.outDir, inv.url);
+          if (fromSession.length > 0) {
+            ctx.log.warn(
+              { url: inv.url, recovered: fromSession.length },
+              "scan: sqlmap stdout empty — recovered injection(s) from session.sqlite",
+            );
+            targetFindings = fromSession;
+          }
+        }
+        findings.push(...targetFindings);
         if (res.timedOut) ctx.log.warn({ url: inv.url }, "scan: sqlmap PARTIAL (target timeout) — kept parsed injection points");
       } catch (err) {
         ctx.log.error({ err, url: inv.url }, "scan: sqlmap failed for url");

@@ -1,4 +1,6 @@
 import { z } from "zod";
+/** Accept an FQDN/wildcard, "localhost", or a bare IPv4 address (local lab testing). */
+export declare function isValidScopeDomain(d: string): boolean;
 export declare const AuthSchema: z.ZodEffects<z.ZodObject<{
     type: z.ZodDefault<z.ZodEnum<["cookie", "header", "none"]>>;
     session: z.ZodOptional<z.ZodString>;
@@ -63,6 +65,13 @@ export declare const ScopeSchema: z.ZodObject<{
     }>>;
     rate_limit_rps: z.ZodDefault<z.ZodNumber>;
     allow_destructive: z.ZodDefault<z.ZodBoolean>;
+    /**
+     * Known param URLs to inject DIRECTLY, bypassing recon discovery. Needed for
+     * SPAs/APIs whose client-side/API routes katana/gau can't crawl (e.g. Juice
+     * Shop /rest/products/search?q=). They still pass the scope gate, payload
+     * cleaning, and signature dedupe like discovered param URLs.
+     */
+    seed_param_urls: z.ZodDefault<z.ZodArray<z.ZodEffects<z.ZodString, string, string>, "many">>;
 }, "strict", z.ZodTypeAny, {
     name: string;
     authorized_by: string;
@@ -81,6 +90,7 @@ export declare const ScopeSchema: z.ZodObject<{
     };
     rate_limit_rps: number;
     allow_destructive: boolean;
+    seed_param_urls: string[];
 }, {
     name: string;
     authorized_by: string;
@@ -99,6 +109,7 @@ export declare const ScopeSchema: z.ZodObject<{
     } | undefined;
     rate_limit_rps?: number | undefined;
     allow_destructive?: boolean | undefined;
+    seed_param_urls?: string[] | undefined;
 }>;
 export type Scope = z.infer<typeof ScopeSchema>;
 export type ScopeAuth = z.infer<typeof AuthSchema>;

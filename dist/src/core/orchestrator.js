@@ -5,17 +5,6 @@ import { runScan } from "../stages/scan/index.js";
 import { runNormalize } from "../stages/normalize/index.js";
 import { runImport } from "../integrations/defectdojo/import.js";
 import { runReport } from "../stages/report/index.js";
-async function severityCounts(runId) {
-    const counts = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0, INFO: 0 };
-    const grouped = await prisma.finding.groupBy({
-        by: ["severity"],
-        where: { runId },
-        _count: { _all: true },
-    });
-    for (const g of grouped)
-        counts[g.severity] = g._count._all;
-    return counts;
-}
 export async function executePipeline(ctx) {
     ctx.bus.runStart({
         toolName: "v1.0.0",
@@ -37,6 +26,11 @@ export async function executePipeline(ctx) {
     });
     let current = "recon";
     try {
+        // --- Resolve external tools to absolute paths BEFORE any stage runs. ---
+        // This fails loudly if a required binary is present but the wrong build
+        // (e.g. a Python `httpx` shadowing the ProjectDiscovery one) instead of
+        // letting recon drift to a silent 0-result outcome.
+        await ctx.tools.resolveAll(ctx.log);
         // --- Recon ---
         current = "recon";
         ctx.bus.stageStart("recon", "Recon");
@@ -83,7 +77,9 @@ export async function executePipeline(ctx) {
             status: "COMPLETED",
             reportPath: report.htmlPath,
             engagementId: imported.engagementId,
-            severity: await severityCounts(ctx.runId),
+            // Use the EXACT counts the report wrote to report.json so the CLI summary
+            // and the report never diverge.
+            severity: report.severityCounts,
         });
         return {
             runId: ctx.runId,

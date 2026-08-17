@@ -2,9 +2,12 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, test, expect } from "vitest";
 import { dalfoxPocToFinding } from "./dalfox.js";
-import { buildGenericFindingsDoc } from "./generic.js";
+import { buildGenericFindingsDoc, type GenericFinding } from "./generic.js";
 import { parseJsonArrayLoose } from "../../lib/parse.js";
 import { parseGeneric } from "../normalize/parsers.js";
+
+const nonNull = (fs: Array<GenericFinding | null>): GenericFinding[] =>
+  fs.filter((f): f is GenericFinding => f !== null);
 
 const fixture = (name: string): string =>
   readFileSync(fileURLToPath(new URL(`./__fixtures__/${name}`, import.meta.url)), "utf8");
@@ -25,7 +28,7 @@ describe("dalfox partial capture — unterminated JSON array from a kill", () =>
     const pocs = parseJsonArrayLoose<Record<string, unknown>>(raw);
     expect(pocs.length).toBe(2);
 
-    const findings = pocs.map(dalfoxPocToFinding);
+    const findings = nonNull(pocs.map(dalfoxPocToFinding));
     expect(findings.length).toBe(2);
 
     for (const f of findings) {
@@ -50,7 +53,7 @@ describe("dalfox partial capture — unterminated JSON array from a kill", () =>
     // Mirror the real pipeline through the ACTUAL doc builder: parse PoCs ->
     // GenericFinding -> buildGenericFindingsDoc -> parseGeneric (feeds report).
     const pocs = parseJsonArrayLoose<Record<string, unknown>>(fixture("dalfox-truncated.json"));
-    const findings = pocs.map(dalfoxPocToFinding);
+    const findings = nonNull(pocs.map(dalfoxPocToFinding));
 
     const doc = buildGenericFindingsDoc(findings);
     // Fix A: NO custom sentinel_* keys anywhere in the DD import payload.
@@ -70,6 +73,56 @@ describe("dalfox partial capture — unterminated JSON array from a kill", () =>
       expect(u.evidence).toBeTruthy();
       expect(u.evidence).toContain("payload:");
     }
+  });
+});
+
+describe("dalfoxPocToFinding — never emits an empty-parameter finding (Bug 2)", () => {
+  test("a real parameterized hit names the param and URL, stays High", () => {
+    const f = dalfoxPocToFinding({
+      type: "V",
+      inject_type: "inHTML-URL",
+      data: "http://127.0.0.1:3000/rest/products/search?q=<svg/onload=alert(1)>",
+      param: "q",
+      payload: "<svg/onload=alert(1)>",
+      evidence: "reflected in JSON body",
+      cwe: "CWE-79",
+      severity: "High",
+    })!;
+    expect(f).not.toBeNull();
+    expect(f.severity).toBe("HIGH");
+    expect(f.title).toContain('parameter "q"');
+    expect(f.title).not.toContain('parameter ""');
+    expect(f.endpoint).toContain("/rest/products/search");
+    expect(f.evidence).toContain("payload:");
+  });
+
+  test("a no-parameter reflected hit WITH a url is low-confidence, titled by URL (not empty param)", () => {
+    const f = dalfoxPocToFinding({
+      type: "R",
+      inject_type: "inHTML",
+      data: "http://127.0.0.1:3000/rest/products/search?q=apple",
+      param: "",
+      payload: "<script>alert(1)</script>",
+      evidence: "",
+      severity: "High",
+    })!;
+    expect(f).not.toBeNull();
+    expect(f.title).not.toContain('parameter ""');
+    expect(f.title).toContain("http://127.0.0.1:3000/rest/products/search");
+    expect(f.endpoint).toBe("http://127.0.0.1:3000/rest/products/search?q=apple");
+    expect(f.severity).toBe("LOW"); // downgraded, unattributed
+  });
+
+  test("a completely empty PoC (no param, url, payload, evidence) is dropped", () => {
+    expect(
+      dalfoxPocToFinding({ type: "R", param: "", data: "", payload: "", evidence: "" }),
+    ).toBeNull();
+  });
+
+  test("the exact empty artifact shape from the run does not become a parameter \"\" finding", () => {
+    // dalfox emitted empty param + empty data for the JSON endpoint.
+    const f = dalfoxPocToFinding({ type: "reflected", param: "", data: "", payload: "", evidence: "" });
+    expect(f).toBeNull(); // nothing actionable -> not rendered as `parameter ""`
   });
 });
 

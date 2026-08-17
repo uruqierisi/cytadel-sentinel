@@ -24,37 +24,60 @@ import type { ScanArtifact } from "./artifacts.js";
  * (parseJsonArrayLoose) so every PoC emitted before the cut becomes a finding.
  */
 
-/**
- * Map one dalfox PoC object (`--format json`) into a unified GenericFinding.
- *
- * The fields ARE present in dalfox's raw JSON — param, data (the injected URL),
- * payload, evidence, cwe, severity — they were previously dropped because the
- * truncated array failed to parse at all. Wire them all through so the report
- * carries the parameter, URL, payload and evidence.
- */
-export function dalfoxPocToFinding(p: Record<string, unknown>): GenericFinding {
-  const url = String(p["data"] ?? p["url"] ?? "");
-  const param = String(p["param"] ?? "");
-  const payload = String(p["payload"] ?? "");
-  const injectType = String(p["inject_type"] ?? p["type"] ?? "reflected");
-  const rawEvidence = String(p["evidence"] ?? p["message_str"] ?? "");
-  const cwe = Number(String(p["cwe"] ?? "").replace(/\D+/g, "")) || 79;
-  const severity = normalizeSeverity(String(p["severity"] ?? "high"));
+/** Tolerant string field read (handles missing/non-string values). */
+function field(p: Record<string, unknown>, ...keys: string[]): string {
+  for (const k of keys) {
+    const v = p[k];
+    if (typeof v === "string" && v.trim().length > 0) return v.trim();
+  }
+  return "";
+}
 
-  // Evidence carries BOTH the payload and dalfox's reflection snippet so the
-  // finding is actionable on its own.
+/**
+ * Map one dalfox PoC object (`--format json`) into a unified GenericFinding, or
+ * null when the PoC is empty noise.
+ *
+ * dalfox's raw JSON carries `param`, `data` (the injected URL), `payload`,
+ * `evidence`, `cwe`, `severity`. For a real parameterized hit we name the
+ * parameter and URL. But on JSON/API endpoints (e.g. Juice Shop's search)
+ * dalfox sometimes reports a reflected vector with NO parameter and even no
+ * URL — a low-confidence, unattributed hit. We must never render
+ * `parameter ""`: such hits are downgraded (LOW) and titled by URL, and a PoC
+ * with no param, no URL, no payload and no evidence is dropped entirely.
+ */
+export function dalfoxPocToFinding(p: Record<string, unknown>): GenericFinding | null {
+  const url = field(p, "data", "url");
+  const param = field(p, "param");
+  const payload = field(p, "payload");
+  const injectType = field(p, "inject_type", "type") || "reflected";
+  const rawEvidence = field(p, "evidence", "message_str");
+  const cwe = Number(field(p, "cwe").replace(/\D+/g, "")) || 79;
+
+  // Nothing actionable at all — drop it rather than emit an empty finding.
+  if (!param && !url && !payload && !rawEvidence) return null;
+
   const evidenceParts: string[] = [];
   if (payload) evidenceParts.push(`payload: ${payload}`);
   if (rawEvidence) evidenceParts.push(`evidence: ${rawEvidence}`);
   const evidence = evidenceParts.join(" | ") || null;
 
-  const description =
-    `dalfox confirmed a cross-site scripting vector on parameter "${param}"` +
-    (payload ? ` using payload: ${payload}.` : ".");
+  const hasParam = param.length > 0;
+  // Real parameterized hit keeps dalfox's severity (default high); an
+  // unattributed no-parameter reflected hit is low confidence.
+  const severity = hasParam ? normalizeSeverity(field(p, "severity") || "high") : "LOW";
+
+  const where = hasParam ? `on parameter "${param}"` : url ? `at ${url}` : "(unattributed)";
+  const title = `XSS (${injectType}) ${where}`.trim();
+  const description = hasParam
+    ? `dalfox confirmed a cross-site scripting vector on parameter "${param}"` +
+      (payload ? ` using payload: ${payload}.` : ".")
+    : `dalfox reported a reflected XSS vector${url ? ` at ${url}` : ""} that could not be ` +
+      `attributed to a specific parameter (low confidence)` +
+      (payload ? ` — payload: ${payload}.` : ".");
 
   return {
     sourceTool: "dalfox",
-    title: `XSS (${injectType}) on parameter "${param}"`,
+    title,
     description,
     severity,
     cwe,
@@ -161,7 +184,7 @@ export async function runDalfox(ctx: RunContext, signatures: string[]): Promise<
         // every complete PoC before the cut is still recovered.
         for (const poc of parseJsonArrayLoose<Record<string, unknown>>(res.stdout)) {
           const finding = dalfoxPocToFinding(poc);
-          if (!byId.has(finding.uniqueId)) byId.set(finding.uniqueId, finding);
+          if (finding && !byId.has(finding.uniqueId)) byId.set(finding.uniqueId, finding);
         }
         if (res.timedOut) {
           anyTimeout = true;

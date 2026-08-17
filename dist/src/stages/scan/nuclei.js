@@ -1,6 +1,6 @@
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
-import { run, toolExists } from "../../lib/exec.js";
+import { run } from "../../lib/exec.js";
 import { audit } from "../../lib/audit.js";
 import { rawDir } from "../../lib/paths.js";
 import { readFileIfNonEmpty } from "../../lib/files.js";
@@ -22,7 +22,8 @@ import { startHeartbeat } from "../../lib/progress.js";
 export async function runNuclei(ctx, urls) {
     if (urls.length === 0)
         return null;
-    if (!(await toolExists("nuclei", ["-version"]))) {
+    const bin = ctx.tools.pathFor("nuclei");
+    if (!bin) {
         ctx.log.warn("scan: nuclei not installed — skipping");
         return null;
     }
@@ -65,7 +66,7 @@ export async function runNuclei(ctx, urls) {
     let timedOut = false;
     let stdout = "";
     try {
-        const res = await run("nuclei", args, {
+        const res = await run(bin, args, {
             input: urls.join("\n") + "\n",
             allowNonZeroExit: true,
             tolerateTimeout: true, // killed -> partial, not thrown away

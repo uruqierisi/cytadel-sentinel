@@ -3,6 +3,7 @@ import type { Scope } from "../config/schema.js";
 import type { ResolvedAuth } from "../config/auth.js";
 import type { LoadedScope } from "../config/scope.js";
 import { type ScopeDecision } from "../config/inScope.js";
+import { ToolRegistry } from "../lib/toolResolver.js";
 import { RunBus } from "./events.js";
 /**
  * Per-run context threaded through every stage. Bundles the validated scope,
@@ -21,6 +22,13 @@ export interface RunContext {
     log: Logger;
     /** Lifecycle event bus the reporter subscribes to. Stages emit onto it. */
     bus: RunBus;
+    /**
+     * External tools resolved to absolute paths. Populated once at pipeline start
+     * (executePipeline calls `tools.resolveAll`). Stage wrappers MUST spawn via
+     * `tools.pathFor(name)` — never a bare tool name — so PATH order can never
+     * decide which binary (e.g. Python vs ProjectDiscovery httpx) is used.
+     */
+    tools: ToolRegistry;
 }
 export declare function createRunContext(params: {
     runId: string;

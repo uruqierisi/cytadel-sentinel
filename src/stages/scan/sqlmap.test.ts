@@ -75,22 +75,9 @@ Parameter: cat (GET)
     expect(findings.map((f) => f.title).join(" ")).toContain('parameter "id"');
   });
 
-  test("real Juice Shop block: q, boolean + time-based, SQLite, q=apple payloads", () => {
-    const out = `
-sqlmap identified the following injection point(s) with a total of 96 HTTP(s) requests:
----
-Parameter: q (GET)
-    Type: boolean-based blind
-    Title: OR boolean-based blind - WHERE or HAVING clause
-    Payload: q=apple') OR 5539=5539 AND ('kUZU'='kUZU
-
-    Type: time-based blind
-    Title: SQLite > 2.0 AND time-based blind (heavy query)
-    Payload: q=apple') AND 1234=LIKE('ABCDEFG',UPPER(HEX(RANDOMBLOB(500000000)))) AND ('a'='a
----
-[12:00:10] [INFO] the back-end DBMS is SQLite
-back-end DBMS: SQLite
-`;
+  test("REAL captured Juice Shop stdout (?q=apple) => 2 High findings, param q, SQLite, payloads", () => {
+    // The full, real sqlmap stdout (preamble + injection block + back-end DBMS).
+    const out = fixture("sqlmap-qapple.stdout.log");
     const url = "http://127.0.0.1:3000/rest/products/search?q=apple";
     const findings = parseSqlmapStdout(out, url);
     expect(findings.length).toBe(2);
@@ -105,6 +92,7 @@ back-end DBMS: SQLite
     }
     expect(findings[0]!.title).toContain("boolean-based blind");
     expect(findings[1]!.title).toContain("time-based blind");
+    expect(findings[0]!.uniqueId).not.toBe(findings[1]!.uniqueId);
   });
 
   test("partial capture: sqlmap killed mid-block (no closing ---) still yields the points", () => {
