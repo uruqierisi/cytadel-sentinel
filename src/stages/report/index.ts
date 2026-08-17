@@ -3,46 +3,27 @@ import path from "node:path";
 import { prisma } from "../../db/client.js";
 import { audit } from "../../lib/audit.js";
 import { runDir, ensureRunDirs } from "../../lib/paths.js";
-import { normalizeSeverity, type Severity } from "../normalize/types.js";
-import { DefectDojoClient } from "../../integrations/defectdojo/client.js";
+import { type Severity } from "../normalize/types.js";
 import { renderHtml, type ReportData, type ReportFinding } from "./template.js";
 import type { RunContext } from "../../core/context.js";
 
 /**
- * Report stage. Pulls the engagement's findings from DefectDojo (post-dedupe /
- * triage) and renders a Cytadel-branded HTML + JSON report under
- * reports/<run-id>/. Falls back to the local finding table if DefectDojo can't
- * be reached, so a report always lands.
+ * Report stage. Renders a Cytadel-branded HTML + JSON report under
+ * reports/<run-id>/ from the LOCAL normalized finding table — the exact same
+ * set the CLI counts and that was imported to DefectDojo. Reading back from
+ * DefectDojo here previously caused a divergence (CLI showed N, report.json 0)
+ * because a fresh import isn't queryable/triaged yet; the DefectDojo engagement
+ * is still linked for drill-down. This makes CLI == report.json == imported set.
  */
 export interface ReportResult {
   htmlPath: string;
   jsonPath: string;
+  /** Severity tally of exactly what was written to report.json (fed to the CLI). */
+  severityCounts: Record<Severity, number>;
+  findingCount: number;
 }
 
 const EMPTY_COUNTS: Record<Severity, number> = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0, INFO: 0 };
-
-async function collectFromDefectDojo(engagementId: number): Promise<ReportFinding[] | null> {
-  try {
-    const dojo = DefectDojoClient.fromEnv();
-    const findings = await dojo.listFindings(engagementId);
-    return findings
-      .filter((f) => !f.false_p && !f.duplicate)
-      .map((f) => ({
-        title: f.title,
-        severity: normalizeSeverity(f.severity),
-        target: f.component_name ?? f.file_path ?? "(see DefectDojo)",
-        sourceTool: "defectdojo",
-        cve: f.cve ?? null,
-        cvss: f.cvssv3_score ?? null,
-        description: f.description ?? null,
-        evidence: f.mitigation ?? null,
-        verified: Boolean(f.verified),
-        active: f.active ?? true,
-      }));
-  } catch {
-    return null;
-  }
-}
 
 async function collectFromLocal(runId: string): Promise<ReportFinding[]> {
   const rows = await prisma.finding.findMany({ where: { runId }, orderBy: { severity: "desc" } });
@@ -68,11 +49,10 @@ export async function runReport(ctx: RunContext, engagementId: number | null): P
   const run = await prisma.run.findUniqueOrThrow({ where: { id: ctx.runId } });
   const assetCount = await prisma.asset.count({ where: { runId: ctx.runId } });
 
-  let findings = engagementId ? await collectFromDefectDojo(engagementId) : null;
-  if (!findings) {
-    ctx.log.warn("report: falling back to local finding table (DefectDojo unavailable)");
-    findings = await collectFromLocal(ctx.runId);
-  }
+  // Source of truth = the local normalized findings persisted this run. This is
+  // exactly what the CLI counts and what was imported to DefectDojo, so all three
+  // agree. The DefectDojo engagement is still linked (below) for triage.
+  const findings = await collectFromLocal(ctx.runId);
 
   // Sort CRITICAL -> INFO and tally.
   const rank: Record<Severity, number> = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3, INFO: 4 };
@@ -115,5 +95,5 @@ export async function runReport(ctx: RunContext, engagementId: number | null): P
     action: "REPORT",
     detail: { htmlPath, jsonPath, findings: findings.length },
   });
-  return { htmlPath, jsonPath };
+  return { htmlPath, jsonPath, severityCounts, findingCount: findings.length };
 }

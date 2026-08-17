@@ -6,7 +6,6 @@ import type { ReconResult } from "../recon/index.js";
 import type { ScanArtifact } from "./artifacts.js";
 import { buildNucleiTargets } from "./targets.js";
 import { paramSignature, planInjectionTargets } from "./params.js";
-import { cleanParamUrls } from "../recon/paramClean.js";
 import { runNuclei } from "./nuclei.js";
 import { runTestssl } from "./testssl.js";
 import { runNikto } from "./nikto.js";
@@ -99,13 +98,17 @@ export async function runScan(ctx: RunContext, recon: ReconResult): Promise<Scan
   // audit event above already records the decision, and the report notes it.
   if (ctx.allowDestructive) {
     // Seed param URLs bypass recon discovery (SPAs/APIs katana/gau can't crawl,
-    // e.g. Juice Shop /rest/products/search?q=). They still get scope-gated,
-    // payload-cleaned, and deduped exactly like discovered ones. Seeds go FIRST
-    // so they always survive the maxInjectionTargets cap.
+    // e.g. Juice Shop /rest/products/search?q=). They are scope-gated but their
+    // VALUES are PRESERVED verbatim — a user who seeds ?q=apple means "fuzz
+    // apple": sqlmap's boolean/time-based blind needs a value that returns real
+    // results to stabilize, and normalizing to ?q=1 breaks detection. (Discovered
+    // params keep normalization — their risk is archived attack payloads; seeds
+    // are user-authored and intentional.) Dedupe still collapses same-signature
+    // seeds via planInjectionTargets, keeping the first real value. Seeds go
+    // FIRST so they always survive the maxInjectionTargets cap.
     const seedCandidates = ctx.scope.seed_param_urls ?? [];
-    const { urls: cleanSeeds } = cleanParamUrls(seedCandidates);
     const gatedSeeds: string[] = [];
-    for (const u of cleanSeeds) {
+    for (const u of seedCandidates) {
       if ((await gate(ctx, u)).allowed) gatedSeeds.push(u);
     }
 

@@ -89,13 +89,19 @@ export const LIMITS = {
     budgetMs: intFromEnv("SENTINEL_DALFOX_BUDGET_MS", 8 * MIN),
   },
 
-  /** sqlmap speed tuning. Defaults trade exhaustiveness for a practical runtime. */
+  /**
+   * sqlmap tuning. sqlmap only runs behind the destructive gate, so these are
+   * destructive-run defaults: level/risk 2 and time-based (T) IN the technique
+   * set, because blind SQLi (e.g. Juice Shop's SQLite search) often needs depth
+   * and time-based to confirm — BEU at level 1 missed it. Still env-overridable
+   * to dial back for speed.
+   */
   sqlmap: {
-    level: intFromEnv("SENTINEL_SQLMAP_LEVEL", 1),
-    risk: intFromEnv("SENTINEL_SQLMAP_RISK", 1),
-    // B=boolean, E=error, U=union — the FAST techniques. Drop S (stacked) and
-    // T (time-based), which dominate sqlmap's runtime.
-    technique: process.env.SENTINEL_SQLMAP_TECHNIQUE ?? "BEU",
+    level: intFromEnv("SENTINEL_SQLMAP_LEVEL", 2),
+    risk: intFromEnv("SENTINEL_SQLMAP_RISK", 2),
+    // B=boolean, E=error, U=union, T=time-based. T is included (blind SQLi needs
+    // it); S (stacked) stays out as it's the slowest and rarely required.
+    technique: process.env.SENTINEL_SQLMAP_TECHNIQUE ?? "BEUT",
     threads: intFromEnv("SENTINEL_SQLMAP_THREADS", 4),
     /** sqlmap --timeout (per HTTP request, seconds). */
     requestTimeoutSec: intFromEnv("SENTINEL_SQLMAP_REQ_TIMEOUT_SEC", 10),

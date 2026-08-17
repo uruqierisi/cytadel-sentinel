@@ -146,4 +146,51 @@ describe("planSqlmapInvocations — one isolated invocation per signature", () =
     expect(args).toContain("-H");
     expect(args[args.indexOf("-H") + 1]).toBe("Cookie: a=b");
   });
+
+  test("every invocation flushes the session (fresh test, no stale false-negative cache)", () => {
+    const plan = planSqlmapInvocations([], SIGNATURES, CFG, BASE_OUT);
+    for (const p of plan) {
+      expect(p.args).toContain("--flush-session");
+    }
+  });
+
+  test("a seeded ?q=apple is fuzzed as q=apple (value preserved into -u), not q=1", () => {
+    const seed = "http://127.0.0.1:3000/rest/products/search?q=apple";
+    const args = buildSqlmapArgs([], seed, CFG, "/out");
+    expect(args[args.indexOf("-u") + 1]).toBe(seed);
+    expect(args.join(" ")).toContain("q=apple");
+    expect(args.join(" ")).not.toContain("q=1");
+  });
+});
+
+describe("parseSqlmapStdout — captures technique AND payload for the report", () => {
+  const URL_APPLE = "http://127.0.0.1:3000/rest/products/search?q=apple";
+  const OUT = `
+sqlmap identified the following injection point(s):
+---
+Parameter: q (GET)
+    Type: boolean-based blind
+    Title: AND boolean-based blind - WHERE or HAVING clause
+    Payload: q=apple') AND 1234=1234 AND ('abcd'='abcd
+
+    Type: time-based blind
+    Title: SQLite > 2.0 AND time-based blind (heavy query)
+    Payload: q=apple') AND 1234=RANDOMBLOB(100000000) AND ('a'='a
+---
+`;
+
+  test("finding carries param, endpoint, technique and payload", () => {
+    const findings = parseSqlmapStdout(OUT, URL_APPLE);
+    expect(findings.length).toBe(1);
+    const f = findings[0]!;
+    expect(f.endpoint).toBe(URL_APPLE); // the q=apple URL, not q=1
+    expect(f.title).toContain('parameter "q"');
+    expect(f.severity).toBe("HIGH");
+    expect(f.evidence).toContain("technique:");
+    expect(f.evidence).toContain("boolean-based blind");
+    expect(f.evidence).toContain("time-based blind");
+    expect(f.evidence).toContain("payload:");
+    expect(f.evidence).toContain("q=apple");
+    expect(f.description).toContain("q=apple");
+  });
 });

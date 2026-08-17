@@ -157,6 +157,9 @@ export function buildSqlmapArgs(
     `--timeout=${cfg.requestTimeoutSec}`,
     `--retries=${cfg.retries}`,
     "--smart",
+    // Fresh test every run: never reuse a prior run's cached "not injectable"
+    // verdict from session.sqlite, which would cause false negatives.
+    "--flush-session",
     `--output-dir=${outDir}`,
   ];
   for (const line of headerLines) args.push("-H", line);
@@ -191,20 +194,28 @@ export function planSqlmapInvocations(
 export function parseSqlmapStdout(stdout: string, url: string): GenericFinding[] {
   const lines = stdout.split(/\r?\n/);
   const findings: GenericFinding[] = [];
-  let current: { param: string; method: string; types: string[]; titles: string[] } | null = null;
+  let current: { param: string; method: string; types: string[]; titles: string[]; payloads: string[] } | null = null;
 
   const flush = (): void => {
     if (!current) return;
-    const evidence = current.titles.length ? current.titles.join("; ") : current.types.join("; ");
+    // Evidence carries the confirmed technique(s) AND the concrete payload(s) so
+    // the report is actionable and reproducible.
+    const parts: string[] = [];
+    if (current.titles.length) parts.push(`technique: ${current.titles.join("; ")}`);
+    else if (current.types.length) parts.push(`technique: ${current.types.join("; ")}`);
+    if (current.payloads.length) parts.push(`payload: ${current.payloads.join(" | ")}`);
     findings.push({
       sourceTool: "sqlmap",
       title: `SQL injection on parameter "${current.param}" (${current.method})`,
-      description: `sqlmap confirmed SQL injection. Types: ${current.types.join(", ") || "unknown"}.`,
+      description:
+        `sqlmap confirmed SQL injection on parameter "${current.param}". ` +
+        `Types: ${current.types.join(", ") || "unknown"}.` +
+        (current.payloads.length ? ` Payload: ${current.payloads[0]}.` : ""),
       severity: "HIGH",
       cwe: 89,
       endpoint: url,
       uniqueId: createHash("sha256").update(`sqlmap|${url}|${current.param}`).digest("hex").slice(0, 32),
-      evidence: evidence || null,
+      evidence: parts.length ? parts.join(" — ") : null,
     });
     current = null;
   };
@@ -214,7 +225,7 @@ export function parseSqlmapStdout(stdout: string, url: string): GenericFinding[]
     const paramMatch = line.match(/^Parameter:\s*(.+?)\s*\((GET|POST|COOKIE|HEADER|URI)\)/i);
     if (paramMatch) {
       flush();
-      current = { param: paramMatch[1]!, method: paramMatch[2]!.toUpperCase(), types: [], titles: [] };
+      current = { param: paramMatch[1]!, method: paramMatch[2]!.toUpperCase(), types: [], titles: [], payloads: [] };
       continue;
     }
     if (current) {
@@ -222,6 +233,8 @@ export function parseSqlmapStdout(stdout: string, url: string): GenericFinding[]
       if (typeMatch) current.types.push(typeMatch[1]!);
       const titleMatch = line.match(/^Title:\s*(.+)$/i);
       if (titleMatch) current.titles.push(titleMatch[1]!);
+      const payloadMatch = line.match(/^Payload:\s*(.+)$/i);
+      if (payloadMatch) current.payloads.push(payloadMatch[1]!);
       // A separator or blank line after a block ends the current parameter.
       if (line === "---" || line === "") {
         // keep accumulating across blank lines within a block; "---" ends it.

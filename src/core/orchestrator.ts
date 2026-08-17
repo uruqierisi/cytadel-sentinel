@@ -2,7 +2,6 @@ import { prisma } from "../db/client.js";
 import { audit } from "../lib/audit.js";
 import type { RunContext } from "./context.js";
 import type { StageId } from "./events.js";
-import type { Severity } from "../stages/normalize/types.js";
 import { runRecon } from "../stages/recon/index.js";
 import { runScan } from "../stages/scan/index.js";
 import { runNormalize } from "../stages/normalize/index.js";
@@ -24,17 +23,6 @@ export interface PipelineOutcome {
   reportHtmlPath?: string;
   engagementId?: number;
   error?: string;
-}
-
-async function severityCounts(runId: string): Promise<Record<Severity, number>> {
-  const counts: Record<Severity, number> = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0, INFO: 0 };
-  const grouped = await prisma.finding.groupBy({
-    by: ["severity"],
-    where: { runId },
-    _count: { _all: true },
-  });
-  for (const g of grouped) counts[g.severity as Severity] = g._count._all;
-  return counts;
 }
 
 export async function executePipeline(ctx: RunContext): Promise<PipelineOutcome> {
@@ -121,7 +109,9 @@ export async function executePipeline(ctx: RunContext): Promise<PipelineOutcome>
       status: "COMPLETED",
       reportPath: report.htmlPath,
       engagementId: imported.engagementId,
-      severity: await severityCounts(ctx.runId),
+      // Use the EXACT counts the report wrote to report.json so the CLI summary
+      // and the report never diverge.
+      severity: report.severityCounts,
     });
     return {
       runId: ctx.runId,
