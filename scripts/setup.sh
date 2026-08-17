@@ -21,6 +21,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 TOOLS_DIR="$ROOT_DIR/tools"
 GOBIN="${GOBIN:-$HOME/go/bin}"
+# Capture the user's PATH as it is in their interactive shell BEFORE we prepend
+# GOBIN — the httpx-shadow check below needs the real ordering to tell whether a
+# Python httpx would win over the ProjectDiscovery one.
+ORIG_PATH="$PATH"
 export PATH="$GOBIN:$PATH"
 
 # ------------------------------------------------------------ result table ---
@@ -28,7 +32,7 @@ export PATH="$GOBIN:$PATH"
 declare -a R_NAME R_STATUS R_DETAIL
 FAILED_REQUIRED=0
 
-record() { # name  status(OK|INSTALLED|SKIP|OPTIONAL|FAIL)  detail
+record() { # name  status(OK|INSTALLED|SKIP|OPTIONAL|WARN|FAIL)  detail
   R_NAME+=("$1"); R_STATUS+=("$2"); R_DETAIL+=("$3")
   if [ "$2" = "FAIL" ]; then FAILED_REQUIRED=$((FAILED_REQUIRED + 1)); fi
 }
@@ -139,6 +143,57 @@ install_go_tools() {
   go_install katana       "github.com/projectdiscovery/katana/cmd/katana@latest"
   go_install gau          "github.com/lc/gau/v2/cmd/gau@latest"
   go_install waybackurls  "github.com/tomnomnom/waybackurls@latest"
+}
+
+# -----------------------------------------------------------------------------
+# httpx PATH-shadow guard.
+#
+# The Python `httpx` package also installs a binary called `httpx` (usually in
+# ~/.local/bin). If that directory precedes $GOBIN on PATH, the Python httpx
+# shadows the ProjectDiscovery one — and because it doesn't understand
+# -json/-silent, recon silently returns 0 web targets.
+#
+# The pipeline now resolves httpx to an absolute path at runtime (so it can't be
+# fooled), but we still warn here so the user can fix their shell PATH.
+# Evaluated against ORIG_PATH (the user's real ordering), not our GOBIN-prepended
+# one, so the check reflects what an interactive shell would actually pick.
+# -----------------------------------------------------------------------------
+is_pd_httpx() { # version-probe-output -> 0 if it looks like the ProjectDiscovery build
+  printf '%s' "$1" | grep -qiE 'projectdiscovery|current httpx version|httpx version|v[0-9]+\.[0-9]+\.[0-9]+'
+}
+
+check_httpx_shadow() {
+  local pd="$GOBIN/httpx" first ver first_dir
+  first="$(PATH="$ORIG_PATH" command -v httpx 2>/dev/null || true)"
+
+  if [ -z "$first" ]; then
+    record "httpx-path" "OK" "no httpx on user PATH yet — $GOBIN/httpx will be used once on PATH"
+    return 0
+  fi
+
+  ver="$(PATH="$ORIG_PATH" httpx -version 2>&1 | head -1 || true)"
+  if is_pd_httpx "$ver"; then
+    record "httpx-path" "OK" "ProjectDiscovery httpx first on PATH: $first"
+    return 0
+  fi
+
+  # First httpx on PATH is NOT the PD build (very likely the Python one).
+  first_dir="$(dirname "$first")"
+  warn "A non-ProjectDiscovery 'httpx' is FIRST on your PATH: $first"
+  warn "  version probe: ${ver:-<no output>}"
+  warn "  This is almost certainly the Python 'httpx' package; it does not understand"
+  warn "  -json/-silent and would make recon return 0 web targets if used."
+  if [ -x "$pd" ]; then
+    warn "  The ProjectDiscovery httpx IS installed at: $pd"
+    warn "  Fix your shell so it wins — add to ~/.bashrc (or ~/.zshrc):"
+    warn "      export PATH=\"$GOBIN:\$PATH\"   # put go/bin BEFORE $first_dir"
+  else
+    warn "  ProjectDiscovery httpx is not in $GOBIN yet; it is installed by this script."
+    warn "  After install, ensure '$GOBIN' precedes '$first_dir' on PATH."
+  fi
+  warn "  (The pipeline resolves httpx to an absolute path at runtime, so scans are"
+  warn "   safe regardless — but fixing PATH avoids surprises with the httpx CLI.)"
+  record "httpx-path" "WARN" "shadowing httpx on PATH: $first (not the PD build)"
 }
 
 update_nuclei_templates() {
@@ -319,7 +374,7 @@ print_summary() {
   for i in "${!R_NAME[@]}"; do
     case "${R_STATUS[$i]}" in
       OK|INSTALLED) color="\033[1;32m" ;;   # green
-      OPTIONAL|SKIP) color="\033[1;33m" ;;   # yellow
+      OPTIONAL|SKIP|WARN) color="\033[1;33m" ;;   # yellow
       FAIL) color="\033[1;31m" ;;            # red
       *) color="\033[0m" ;;
     esac
@@ -352,6 +407,7 @@ main() {
   install_go
   install_libpcap
   install_go_tools
+  check_httpx_shadow
   update_nuclei_templates
   install_nikto
   install_testssl

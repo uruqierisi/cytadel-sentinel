@@ -6,6 +6,7 @@ import { resolveAuth } from "../config/auth.js";
 import { evaluateScope, type ScopeDecision } from "../config/inScope.js";
 import { audit } from "../lib/audit.js";
 import { runLogger } from "../lib/logger.js";
+import { ToolRegistry } from "../lib/toolResolver.js";
 import { RunBus } from "./events.js";
 
 /**
@@ -25,6 +26,13 @@ export interface RunContext {
   log: Logger;
   /** Lifecycle event bus the reporter subscribes to. Stages emit onto it. */
   bus: RunBus;
+  /**
+   * External tools resolved to absolute paths. Populated once at pipeline start
+   * (executePipeline calls `tools.resolveAll`). Stage wrappers MUST spawn via
+   * `tools.pathFor(name)` — never a bare tool name — so PATH order can never
+   * decide which binary (e.g. Python vs ProjectDiscovery httpx) is used.
+   */
+  tools: ToolRegistry;
 }
 
 export function createRunContext(params: {
@@ -46,6 +54,7 @@ export function createRunContext(params: {
     allowDestructive: loaded.scope.allow_destructive && cliAllowDestructive,
     log: runLogger(runId),
     bus: params.bus ?? new RunBus(),
+    tools: new ToolRegistry(),
   };
 }
 

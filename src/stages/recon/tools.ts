@@ -1,4 +1,4 @@
-import { run, toolExists } from "../../lib/exec.js";
+import { run } from "../../lib/exec.js";
 import { parseLines, parseJsonl } from "../../lib/parse.js";
 import { audit } from "../../lib/audit.js";
 import { LIMITS } from "../../config/limits.js";
@@ -7,7 +7,9 @@ import type { RunContext } from "../../core/context.js";
 
 /**
  * Thin, defensive wrappers around each recon binary. Every wrapper:
- *   - checks the tool exists (degrades to [] + a logged skip if not),
+ *   - resolves the tool to an ABSOLUTE PATH via ctx.tools (never a bare name,
+ *     so PATH order can't pick a shadowing binary); degrades to [] + a logged
+ *     skip if the tool is absent,
  *   - passes target data ONLY as argv or stdin (never a shell string),
  *   - audit-logs the TOOL_EXEC.
  *
@@ -15,12 +17,17 @@ import type { RunContext } from "../../core/context.js";
  * httpx uses JSON because we need its structured fingerprint fields.
  */
 
-async function ensure(ctx: RunContext, tool: string, versionArgs?: string[]): Promise<boolean> {
-  const exists = await toolExists(tool, versionArgs ?? ["-version"]);
-  if (!exists) {
+/**
+ * Absolute path of a resolved tool, or null (with a logged skip) if it is
+ * absent. Wrong-build mismatches never reach here — they fail loudly at
+ * ctx.tools.resolveAll() during pipeline startup.
+ */
+function binPath(ctx: RunContext, tool: string): string | null {
+  const p = ctx.tools.pathFor(tool);
+  if (!p) {
     ctx.log.warn({ tool }, "recon: tool not installed — skipping (run scripts/setup.sh in WSL2/Linux)");
   }
-  return exists;
+  return p;
 }
 
 async function logExec(ctx: RunContext, tool: string, target: string): Promise<void> {
@@ -36,11 +43,12 @@ async function logExec(ctx: RunContext, tool: string, target: string): Promise<v
 
 /** subfinder: passive subdomain enumeration for one apex domain. */
 export async function subfinder(ctx: RunContext, domain: string): Promise<string[]> {
-  if (!(await ensure(ctx, "subfinder"))) return [];
+  const bin = binPath(ctx, "subfinder");
+  if (!bin) return [];
   await logExec(ctx, "subfinder", domain);
   const hb = startHeartbeat(ctx, "recon", "subfinder", { total: 1 });
   try {
-    const { stdout } = await run("subfinder", ["-d", domain, "-silent"], {
+    const { stdout } = await run(bin, ["-d", domain, "-silent"], {
       allowNonZeroExit: true,
       timeoutMs: LIMITS.toolTimeoutMs.subfinder,
     });
@@ -68,7 +76,8 @@ export interface HttpxResult {
  */
 export async function httpx(ctx: RunContext, hosts: string[]): Promise<HttpxResult[]> {
   if (hosts.length === 0) return [];
-  if (!(await ensure(ctx, "httpx"))) return [];
+  const bin = binPath(ctx, "httpx");
+  if (!bin) return [];
   await logExec(ctx, "httpx", `${hosts.length} hosts`);
 
   const args = [
@@ -88,7 +97,7 @@ export async function httpx(ctx: RunContext, hosts: string[]): Promise<HttpxResu
 
   const hb = startHeartbeat(ctx, "recon", "httpx", { total: hosts.length });
   try {
-    const { stdout } = await run("httpx", args, {
+    const { stdout } = await run(bin, args, {
       input: hosts.join("\n") + "\n",
       allowNonZeroExit: true,
       timeoutMs: LIMITS.toolTimeoutMs.httpx,
@@ -111,7 +120,8 @@ export async function httpx(ctx: RunContext, hosts: string[]): Promise<HttpxResu
 
 /** katana: active crawl of a single URL to discover endpoints. */
 export async function katana(ctx: RunContext, url: string): Promise<string[]> {
-  if (!(await ensure(ctx, "katana"))) return [];
+  const bin = binPath(ctx, "katana");
+  if (!bin) return [];
   await logExec(ctx, "katana", url);
   const args = ["-u", url, "-silent", "-d", "2", "-jc", "-no-color", "-rl", String(ctx.scope.rate_limit_rps)];
   for (const line of ctx.auth.headerLines) {
@@ -119,7 +129,7 @@ export async function katana(ctx: RunContext, url: string): Promise<string[]> {
   }
   const hb = startHeartbeat(ctx, "recon", "katana", { total: 1 });
   try {
-    const { stdout } = await run("katana", args, {
+    const { stdout } = await run(bin, args, {
       allowNonZeroExit: true,
       timeoutMs: LIMITS.toolTimeoutMs.katana,
     });
@@ -134,11 +144,12 @@ export async function katana(ctx: RunContext, url: string): Promise<string[]> {
 
 /** gau: pull historical URLs for a domain from public sources. */
 export async function gau(ctx: RunContext, domain: string): Promise<string[]> {
-  if (!(await ensure(ctx, "gau", ["--version"]))) return [];
+  const bin = binPath(ctx, "gau");
+  if (!bin) return [];
   await logExec(ctx, "gau", domain);
   const hb = startHeartbeat(ctx, "recon", "gau", { total: 1 });
   try {
-    const { stdout } = await run("gau", ["--subs", domain], {
+    const { stdout } = await run(bin, ["--subs", domain], {
       allowNonZeroExit: true,
       timeoutMs: LIMITS.toolTimeoutMs.gau,
     });
@@ -153,11 +164,12 @@ export async function gau(ctx: RunContext, domain: string): Promise<string[]> {
 
 /** waybackurls: historical URLs from the Wayback Machine. */
 export async function waybackurls(ctx: RunContext, domain: string): Promise<string[]> {
-  if (!(await ensure(ctx, "waybackurls", ["-h"]))) return [];
+  const bin = binPath(ctx, "waybackurls");
+  if (!bin) return [];
   await logExec(ctx, "waybackurls", domain);
   const hb = startHeartbeat(ctx, "recon", "waybackurls", { total: 1 });
   try {
-    const { stdout } = await run("waybackurls", [domain], {
+    const { stdout } = await run(bin, [domain], {
       allowNonZeroExit: true,
       timeoutMs: LIMITS.toolTimeoutMs.waybackurls,
     });
@@ -172,11 +184,12 @@ export async function waybackurls(ctx: RunContext, domain: string): Promise<stri
 
 /** naabu: light top-ports scan of one host for port context. */
 export async function naabu(ctx: RunContext, host: string): Promise<number[]> {
-  if (!(await ensure(ctx, "naabu"))) return [];
+  const bin = binPath(ctx, "naabu");
+  if (!bin) return [];
   await logExec(ctx, "naabu", host);
   try {
     const { stdout } = await run(
-      "naabu",
+      bin,
       ["-host", host, "-top-ports", "100", "-silent", "-no-color"],
       { allowNonZeroExit: true, timeoutMs: LIMITS.toolTimeoutMs.naabu },
     );

@@ -60,6 +60,12 @@ export async function executePipeline(ctx: RunContext): Promise<PipelineOutcome>
 
   let current: StageId = "recon";
   try {
+    // --- Resolve external tools to absolute paths BEFORE any stage runs. ---
+    // This fails loudly if a required binary is present but the wrong build
+    // (e.g. a Python `httpx` shadowing the ProjectDiscovery one) instead of
+    // letting recon drift to a silent 0-result outcome.
+    await ctx.tools.resolveAll(ctx.log);
+
     // --- Recon ---
     current = "recon";
     ctx.bus.stageStart("recon", "Recon");

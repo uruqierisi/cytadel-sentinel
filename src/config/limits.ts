@@ -37,7 +37,8 @@ export const LIMITS = {
     nikto: intFromEnv("SENTINEL_NIKTO_TIMEOUT_MS", 8 * MIN),
     testssl: intFromEnv("SENTINEL_TESTSSL_TIMEOUT_MS", 10 * MIN),
     retire: intFromEnv("SENTINEL_RETIRE_TIMEOUT_MS", 5 * MIN),
-    // dalfox runs as one aggregate pipe over all targets (destructive gate only).
+    // dalfox is now batch+budget tuned via LIMITS.dalfox (batchTimeoutMs /
+    // budgetMs); this legacy per-run cap is retained only as a fallback default.
     dalfox: intFromEnv("SENTINEL_DALFOX_TIMEOUT_MS", 10 * MIN),
   },
 
@@ -59,6 +60,34 @@ export const LIMITS = {
    * test — so this cap is on distinct injection signatures, not raw URLs.
    */
   maxInjectionTargets: intFromEnv("SENTINEL_MAX_INJECTION_TARGETS", 25),
+
+  /**
+   * dalfox speed tuning. dalfox ran ~10 min on a handful of signatures and got
+   * SIGTERM-killed mid-write, truncating its JSON array. These flags make it
+   * FINISH (so it emits a complete array), and the batch+budget model mirrors
+   * sqlmap: run targets in small batches and stop launching new batches once the
+   * overall wall-clock budget is spent — completed batches emit complete JSON.
+   */
+  dalfox: {
+    /** dalfox --worker (concurrent workers). */
+    worker: intFromEnv("SENTINEL_DALFOX_WORKER", 100),
+    /** dalfox --timeout (per HTTP request, seconds). */
+    requestTimeoutSec: intFromEnv("SENTINEL_DALFOX_REQ_TIMEOUT_SEC", 10),
+    /** Skip dalfox's Basic Another Vulnerability sweep — a big time sink for XSS. */
+    skipBav: (process.env.SENTINEL_DALFOX_SKIP_BAV ?? "1") !== "0",
+    /**
+     * Optional blind-XSS callback URL. When set, `--blind <url>` is added so
+     * out-of-band hits are caught; left empty by default so blind testing never
+     * adds unbounded requests to a time-boxed run.
+     */
+    blindCallback: process.env.SENTINEL_DALFOX_BLIND_URL ?? "",
+    /** How many deduped signatures per dalfox pipe invocation. */
+    batchSize: intFromEnv("SENTINEL_DALFOX_BATCH_SIZE", 10),
+    /** Hard exec cap PER batch (ms). */
+    batchTimeoutMs: intFromEnv("SENTINEL_DALFOX_BATCH_TIMEOUT_MS", 3 * MIN),
+    /** Overall wall-clock budget for the whole dalfox stage (ms). */
+    budgetMs: intFromEnv("SENTINEL_DALFOX_BUDGET_MS", 8 * MIN),
+  },
 
   /** sqlmap speed tuning. Defaults trade exhaustiveness for a practical runtime. */
   sqlmap: {
