@@ -197,7 +197,10 @@ export function buildSqlmapArgs(
     `--threads=${cfg.threads}`,
     `--timeout=${cfg.requestTimeoutSec}`,
     `--retries=${cfg.retries}`,
-    "--smart",
+    // NOTE: --smart is deliberately NOT used. It skips any parameter that fails
+    // the basic heuristic before real testing — but blind SQLi (e.g. Juice Shop's
+    // ?q=) often fails that heuristic while still being injectable, so --smart
+    // produced false negatives ("all tested parameters do not appear injectable").
     // Fresh test every run: never reuse a prior run's cached "not injectable"
     // verdict from session.sqlite, which would cause false negatives.
     "--flush-session",

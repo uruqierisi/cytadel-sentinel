@@ -184,6 +184,17 @@ describe("planSqlmapInvocations — one isolated invocation per signature", () =
     }
   });
 
+  test("does NOT use --smart (it skips blind-injectable params that fail the basic heuristic)", () => {
+    const plan = planSqlmapInvocations([], SIGNATURES, CFG, BASE_OUT);
+    for (const p of plan) {
+      expect(p.args).not.toContain("--smart");
+      // The full-testing flags are still present.
+      expect(p.args).toContain("--flush-session");
+      expect(p.args).toContain("--level=2");
+      expect(p.args).toContain("--risk=2");
+    }
+  });
+
   test("a seeded ?q=apple is fuzzed as q=apple (value preserved into -u), not q=1", () => {
     const seed = "http://127.0.0.1:3000/rest/products/search?q=apple";
     const args = buildSqlmapArgs([], seed, CFG, "/out");
