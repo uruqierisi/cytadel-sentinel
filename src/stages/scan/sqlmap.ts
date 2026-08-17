@@ -7,7 +7,6 @@ import { LIMITS } from "../../config/limits.js";
 import { startHeartbeat } from "../../lib/progress.js";
 import { gate, type RunContext } from "../../core/context.js";
 import { resolveSqlmap } from "./resolve.js";
-import { dedupeParamSignatures } from "./params.js";
 import { writeGenericFindingsFile, type GenericFinding } from "./generic.js";
 import type { ScanArtifact } from "./artifacts.js";
 
@@ -24,25 +23,25 @@ import type { ScanArtifact } from "./artifacts.js";
  *   - partial capture: a killed target still contributes whatever injection
  *     points were confirmed in its stdout.
  */
-export async function runSqlmap(ctx: RunContext, paramUrls: string[]): Promise<ScanArtifact | null> {
-  if (paramUrls.length === 0) return null;
+/**
+ * @param signatures ALREADY-deduped injection signatures — the SAME capped list
+ *   dalfox receives (see scan/index.ts). Never the raw param URLs.
+ */
+export async function runSqlmap(ctx: RunContext, signatures: string[]): Promise<ScanArtifact | null> {
+  if (signatures.length === 0) return null;
   const tool = await resolveSqlmap();
   if (!tool) {
     ctx.log.warn("scan: sqlmap not installed — skipping (install via scripts/setup.sh)");
     return null;
   }
 
-  // Dedupe by injection signature, then defensively re-gate.
-  const signatures = dedupeParamSignatures(paramUrls, LIMITS.maxInjectionTargets);
+  // Input is already deduped + capped upstream. Re-gate defensively.
   const targets: string[] = [];
   for (const u of signatures) {
     if ((await gate(ctx, u)).allowed) targets.push(u);
   }
   if (targets.length === 0) return null;
-  ctx.log.info(
-    { rawParamUrls: paramUrls.length, dedupedSignatures: targets.length },
-    "scan: sqlmap targets after signature dedupe",
-  );
+  ctx.log.info({ signatures: targets.length }, "scan: sqlmap running over deduped signatures");
 
   await audit({
     runId: ctx.runId,

@@ -5,6 +5,7 @@ import { gate, type RunContext } from "../../core/context.js";
 import type { ReconResult } from "../recon/index.js";
 import type { ScanArtifact } from "./artifacts.js";
 import { buildNucleiTargets } from "./targets.js";
+import { dedupeParamSignatures } from "./params.js";
 import { runNuclei } from "./nuclei.js";
 import { runTestssl } from "./testssl.js";
 import { runNikto } from "./nikto.js";
@@ -96,10 +97,24 @@ export async function runScan(ctx: RunContext, recon: ReconResult): Promise<Scan
   // destructive gate. When closed (default) we skip silently; the DESTRUCTIVE_GATE
   // audit event above already records the decision, and the report notes it.
   if (ctx.allowDestructive) {
-    ctx.bus.stageProgress("scan", `active injection over ${recon.paramUrls.length} param URL(s)`, false);
-    const dalfoxArtifact = await runDalfox(ctx, recon.paramUrls);
+    // Collapse the raw param URLs to distinct injection SIGNATURES exactly ONCE,
+    // then hand the SAME capped list to both tools. dalfox and sqlmap must run
+    // over the identical ~7-25 deduped signatures — never the raw hundreds — or
+    // they burn their whole time budget on duplicate id= params and get killed
+    // before reaching the interesting ones (e.g. Search.asp?tfSearch).
+    const injectionTargets = dedupeParamSignatures(recon.paramUrls, LIMITS.maxInjectionTargets);
+    ctx.bus.stageProgress(
+      "scan",
+      `active injection over ${injectionTargets.length} deduped signature(s) (from ${recon.paramUrls.length} param URL(s))`,
+      false,
+    );
+    ctx.log.info(
+      { rawParamUrls: recon.paramUrls.length, injectionTargets: injectionTargets.length, cap: LIMITS.maxInjectionTargets },
+      "scan: active-injection targets (shared by dalfox + sqlmap)",
+    );
+    const dalfoxArtifact = await runDalfox(ctx, injectionTargets);
     if (dalfoxArtifact) artifacts.push(dalfoxArtifact);
-    const sqlmapArtifact = await runSqlmap(ctx, recon.paramUrls);
+    const sqlmapArtifact = await runSqlmap(ctx, injectionTargets);
     if (sqlmapArtifact) artifacts.push(sqlmapArtifact);
   } else {
     ctx.log.info(

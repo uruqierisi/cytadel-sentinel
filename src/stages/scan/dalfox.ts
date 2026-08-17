@@ -9,7 +9,6 @@ import { parseJsonArrayLoose } from "../../lib/parse.js";
 import { normalizeSeverity } from "../normalize/types.js";
 import { gate, type RunContext } from "../../core/context.js";
 import { resolveDalfox } from "./resolve.js";
-import { dedupeParamSignatures } from "./params.js";
 import { writeGenericFindingsFile, type GenericFinding } from "./generic.js";
 import type { ScanArtifact } from "./artifacts.js";
 
@@ -77,25 +76,28 @@ function chunk<T>(items: T[], size: number): T[][] {
   return out;
 }
 
-export async function runDalfox(ctx: RunContext, paramUrls: string[]): Promise<ScanArtifact | null> {
-  if (paramUrls.length === 0) return null;
+/**
+ * @param signatures ALREADY-deduped injection signatures (path + param NAME),
+ *   the SAME capped list sqlmap receives — see scan/index.ts. dalfox must never
+ *   be handed the raw param URLs, or it burns its budget on duplicate params.
+ */
+export async function runDalfox(ctx: RunContext, signatures: string[]): Promise<ScanArtifact | null> {
+  if (signatures.length === 0) return null;
   const tool = await resolveDalfox();
   if (!tool) {
     ctx.log.warn("scan: dalfox not installed — skipping (install via scripts/setup.sh)");
     return null;
   }
 
-  // Dedupe by injection signature (path + param NAME), then defensively re-gate.
-  const signatures = dedupeParamSignatures(paramUrls, LIMITS.maxInjectionTargets);
+  // Input is already deduped + capped upstream. Re-gate defensively; never
+  // re-expand it.
   const targets: string[] = [];
   for (const u of signatures) {
     if ((await gate(ctx, u)).allowed) targets.push(u);
   }
   if (targets.length === 0) return null;
-  ctx.log.info(
-    { rawParamUrls: paramUrls.length, dedupedSignatures: targets.length },
-    "scan: dalfox targets after signature dedupe",
-  );
+  ctx.log.info({ signatures: targets.length }, "scan: dalfox running over deduped signatures");
+  ctx.bus.stageProgress("scan", `dalfox: ${targets.length} deduped signature(s)`, false);
 
   const cfg = LIMITS.dalfox;
   const args = [
