@@ -3,6 +3,7 @@ import { evaluateScope } from "../config/inScope.js";
 import { audit } from "../lib/audit.js";
 import { runLogger } from "../lib/logger.js";
 import { ToolRegistry } from "../lib/toolResolver.js";
+import { newCoverage } from "./coverage.js";
 import { RunBus } from "./events.js";
 export function createRunContext(params) {
     const { runId, actor, loaded, cliAllowDestructive } = params;
@@ -18,6 +19,7 @@ export function createRunContext(params) {
         log: runLogger(runId),
         bus: params.bus ?? new RunBus(),
         tools: new ToolRegistry(),
+        coverage: newCoverage(),
     };
 }
 /**

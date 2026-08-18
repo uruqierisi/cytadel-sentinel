@@ -41,6 +41,12 @@ export async function executePipeline(ctx) {
             await ensureSessionLive(ctx);
             ctx.bus.stageProgress("recon", ctx.auth.degraded ? "auth: session DEGRADED — scanning anonymously" : "auth: session active", false);
         }
+        // WP4 coverage: auth state + resolved tool versions.
+        ctx.coverage.auth = {
+            state: ctx.auth.degraded ? "degraded" : ctx.auth.enabled ? "authenticated" : "anonymous",
+            mode: ctx.scope.auth.type,
+        };
+        ctx.coverage.tools = ctx.tools.list().map((t) => ({ name: t.name, version: t.version }));
         // --- Recon ---
         current = "recon";
         ctx.bus.stageStart("recon", "Recon");

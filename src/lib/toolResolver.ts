@@ -289,6 +289,11 @@ export class ToolRegistry {
     return this.resolved.get(name);
   }
 
+  /** All successfully-resolved tools (for coverage: tools run + versions). */
+  list(): ResolvedTool[] {
+    return [...this.resolved.values()];
+  }
+
   isResolved(): boolean {
     return this.done;
   }

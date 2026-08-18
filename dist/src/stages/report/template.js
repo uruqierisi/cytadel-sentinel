@@ -43,6 +43,34 @@ function findingRow(f) {
       <td class="f-target">${esc(f.target)}</td>
     </tr>`;
 }
+function coverageSection(c) {
+    const pair = (label, tested, discovered) => `
+      <div><div class="k">${label} tested / discovered</div><div class="v">${tested} / ${discovered}</div></div>`;
+    const authClass = c.authState === "authenticated" ? "ok" : c.authState === "degraded" ? "bad" : "warn";
+    const sources = Object.entries(c.candidatesBySource)
+        .filter(([, n]) => n > 0)
+        .map(([s, n]) => `${esc(s)} ${n}`)
+        .join(" · ") || "none";
+    const toolList = c.tools.length
+        ? c.tools.map((t) => `${esc(t.name)} <span class="dim">${esc(t.version)}</span>`).join(", ")
+        : "(none resolved)";
+    const lims = c.limitations.length
+        ? c.limitations.map((l) => `<li>${esc(l)}</li>`).join("")
+        : `<li class="ok">No coverage limitations recorded for this run.</li>`;
+    return `
+  <h2>Coverage</h2>
+  <div class="meta">
+    ${pair("Hosts", c.hosts.tested, c.hosts.discovered)}
+    ${pair("Endpoints", c.endpoints.tested, c.endpoints.discovered)}
+    ${pair("Injectable params", c.params.tested, c.params.discovered)}
+    <div><div class="k">Authentication</div><div class="v cov-${authClass}">${esc(c.authState)}${c.authMode && c.authMode !== "none" ? ` <span class="dim">(${esc(c.authMode)})</span>` : ""}</div></div>
+    <div><div class="k">Injection candidates by source</div><div class="v">${sources}</div></div>
+    <div><div class="k">Body (POST/PUT) tested</div><div class="v">${c.injection.post > 0 ? `yes (${c.injection.post})` : "no"}</div></div>
+    <div style="grid-column:1/-1"><div class="k">Tools used</div><div class="v">${toolList}</div></div>
+  </div>
+  <h2 style="font-size:13px;margin-top:16px">Coverage limitations</h2>
+  <ul class="cov-lims">${lims}</ul>`;
+}
 const LOGO = `
 <svg width="42" height="42" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
   <path d="M32 3l24 9v16c0 15-10 27-24 33C18 55 8 43 8 28V12l24-9z" fill="#0b1f3a" stroke="#28e0c8" stroke-width="2.5"/>
@@ -96,6 +124,13 @@ export function renderHtml(d) {
   .tag{font-size:10px;padding:1px 6px;border-radius:5px;border:1px solid var(--line);color:var(--muted)}
   .tag.verified{color:var(--brand);border-color:var(--brand)}
   .empty{color:var(--muted);text-align:center;padding:24px}
+  .dim{color:var(--muted);font-size:12px}
+  .cov-ok{color:#2f9e6b;font-weight:600}
+  .cov-warn{color:#f5b301;font-weight:600}
+  .cov-bad{color:#e0245e;font-weight:700}
+  .cov-lims{margin:6px 0 0;padding-left:18px;color:#cdd9ec;font-size:13px}
+  .cov-lims li{margin:4px 0}
+  .cov-lims li.ok{color:#2f9e6b;list-style:none;margin-left:-18px}
   .banner{margin:20px 0;padding:10px 14px;border-radius:8px;background:#1a1230;border:1px solid #6b3fa0;color:#d9c6ff;font-size:13px}
   footer{margin-top:36px;color:var(--muted);font-size:12px;border-top:1px solid var(--line);padding-top:16px}
   a{color:var(--brand)}
@@ -131,6 +166,8 @@ export function renderHtml(d) {
     <div><div class="k">Started</div><div class="v">${esc(d.startedAt)}</div></div>
     <div><div class="k">Finished</div><div class="v">${esc(d.finishedAt)}</div></div>
   </div>
+
+  ${coverageSection(d.coverage)}
 
   <h2>Severity summary</h2>
   <div class="cards">${summaryCards(d.severityCounts)}</div>

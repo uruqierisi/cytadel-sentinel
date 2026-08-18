@@ -86,6 +86,20 @@ export async function runScan(ctx, recon) {
         const merged = [...seedCandidates, ...recon.injectionCandidates];
         const injectionTargets = dedupeCandidates(merged, LIMITS.maxInjectionTargets);
         const bySource = countBySource(injectionTargets);
+        // WP4: record what was actually fuzzed (params tested, GET vs POST bodies).
+        const getCount = injectionTargets.filter((c) => c.method === "GET").length;
+        const postCount = injectionTargets.length - getCount;
+        ctx.coverage.params.tested = injectionTargets.length;
+        ctx.coverage.candidatesBySource = bySource;
+        ctx.coverage.injection = { get: getCount, post: postCount, ran: injectionTargets.length > 0 };
+        // The dedupe cap silently drops candidates beyond the limit — surface it.
+        if (merged.length > injectionTargets.length) {
+            ctx.coverage.caps.push({
+                name: "injection-target cap",
+                cap: LIMITS.maxInjectionTargets,
+                dropped: merged.length - injectionTargets.length,
+            });
+        }
         ctx.bus.stageProgress("scan", `active injection over ${injectionTargets.length} candidate(s) ` +
             `(seed ${bySource.seed} · discovery ${bySource.discovery} · js ${bySource.js} · ` +
             `openapi ${bySource.openapi} · graphql ${bySource.graphql})`, false);
@@ -100,6 +114,13 @@ export async function runScan(ctx, recon) {
             artifacts.push(sqlmapArtifact);
     }
     else {
+        // WP4: injection didn't run — record the reason as a coverage limitation.
+        ctx.coverage.injection = {
+            get: 0,
+            post: 0,
+            ran: false,
+            skippedReason: "destructive gate closed (scope allow_destructive:false and/or no --allow-destructive)",
+        };
         ctx.log.info({ paramUrls: recon.paramUrls.length }, "scan: active injection (dalfox/sqlmap) skipped — destructive gate closed");
     }
     // SECURITY: several tools echo their full command line (incl. -H

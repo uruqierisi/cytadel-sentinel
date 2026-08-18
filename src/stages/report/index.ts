@@ -4,6 +4,7 @@ import { prisma } from "../../db/client.js";
 import { audit } from "../../lib/audit.js";
 import { runDir, ensureRunDirs } from "../../lib/paths.js";
 import { authSecretValues, scrubString } from "../../lib/scrub.js";
+import { coverageLimitations } from "../../core/coverage.js";
 import { type Severity } from "../normalize/types.js";
 import { renderHtml, type ReportData, type ReportFinding } from "./template.js";
 import type { RunContext } from "../../core/context.js";
@@ -80,6 +81,17 @@ export async function runReport(ctx: RunContext, engagementId: number | null): P
     defectDojoUrl: process.env.DEFECTDOJO_URL?.replace(/\/+$/, "") ?? null,
     severityCounts,
     findings,
+    coverage: {
+      hosts: ctx.coverage.hosts,
+      endpoints: ctx.coverage.endpoints,
+      params: ctx.coverage.params,
+      authState: ctx.coverage.auth.state,
+      authMode: ctx.coverage.auth.mode,
+      candidatesBySource: ctx.coverage.candidatesBySource,
+      injection: { get: ctx.coverage.injection.get, post: ctx.coverage.injection.post, ran: ctx.coverage.injection.ran },
+      tools: ctx.coverage.tools,
+      limitations: coverageLimitations(ctx.coverage),
+    },
   };
 
   const dir = runDir(ctx.runId);

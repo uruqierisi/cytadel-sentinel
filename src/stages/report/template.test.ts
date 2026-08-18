@@ -51,6 +51,17 @@ function baseData(findings: ReportFinding[]): ReportData {
     defectDojoUrl: null,
     severityCounts,
     findings,
+    coverage: {
+      hosts: { discovered: 1, tested: 1 },
+      endpoints: { discovered: 5, tested: 5 },
+      params: { discovered: 3, tested: 3 },
+      authState: "authenticated",
+      authMode: "form_login",
+      candidatesBySource: { discovery: 0, seed: 1, js: 2, openapi: 0, graphql: 0 },
+      injection: { get: 3, post: 0, ran: true },
+      tools: [{ name: "sqlmap", version: "1.8.8" }],
+      limitations: [],
+    },
   };
 }
 
@@ -75,5 +86,30 @@ describe("renderHtml — the seeded SQLi shows in the HTML report", () => {
     const data = baseData([reportFindingFromSqlmap()]);
     expect(data.severityCounts.HIGH).toBe(1);
     expect(data.findings.length).toBe(1);
+  });
+
+  test("renders a Coverage section with tested-vs-discovered counts, auth, tools", () => {
+    expect(html).toContain("Coverage");
+    expect(html).toContain("tested / discovered");
+    expect(html).toContain("5 / 5"); // endpoints tested/discovered
+    expect(html).toContain("authenticated"); // auth coverage line
+    expect(html).toContain("sqlmap"); // tool used
+    expect(html).toContain("1.8.8"); // tool version
+  });
+
+  test("Coverage limitations (caps, degraded auth) render in the HTML", () => {
+    const data = baseData([]);
+    data.coverage.limitations = [
+      "endpoint cap hit (limit 300, 2 host(s)): 568 item(s) dropped and NOT tested.",
+      "Authentication DEGRADED mid-run — content behind login may be under-tested.",
+      "OpenAPI: probed 6 location(s), no parseable spec found",
+    ];
+    data.coverage.authState = "degraded";
+    const out = renderHtml(data);
+    expect(out).toContain("Coverage limitations");
+    expect(out).toContain("568 item(s) dropped");
+    expect(out).toContain("DEGRADED");
+    expect(out).toContain("no parseable spec found");
+    expect(out).toContain("cov-bad"); // degraded auth styled prominently
   });
 });

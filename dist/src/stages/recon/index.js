@@ -139,6 +139,20 @@ export async function runRecon(ctx) {
     for (const [host, dropped] of jsTruncated) {
         ctx.log.warn({ host, dropped, cap: LIMITS.maxJsAssetsPerHost }, "recon: JS asset cap reached");
     }
+    // WP4: record cap-driven coverage loss (visible in the report, not just logs).
+    const endpointDropped = [...truncated.values()].reduce((a, b) => a + b, 0);
+    if (endpointDropped > 0) {
+        ctx.coverage.caps.push({
+            name: "endpoint cap",
+            cap: LIMITS.maxEndpointsPerHost,
+            dropped: endpointDropped,
+            detail: `${truncated.size} host(s)`,
+        });
+    }
+    const jsDropped = [...jsTruncated.values()].reduce((a, b) => a + b, 0);
+    if (jsDropped > 0) {
+        ctx.coverage.caps.push({ name: "JS-asset cap", cap: LIMITS.maxJsAssetsPerHost, dropped: jsDropped, detail: `${jsTruncated.size} host(s)` });
+    }
     const endpointSet = new Set([...cappedNonJs, ...cappedJs]);
     const jsSet = new Set(cappedJs);
     // Injection candidates: keep only param URLs whose VALUES are real values, not
@@ -186,6 +200,15 @@ export async function runRecon(ctx) {
         ...graphql.candidates,
     ];
     const bySource = countBySource(injectionCandidates);
+    // WP4: record discovery coverage — what was found across hosts/endpoints/params.
+    discoveryNotes.push(`JS assets analysed: ${jsAssets.length}`);
+    ctx.coverage.hosts.discovered = discovered.size;
+    ctx.coverage.hosts.tested = webTargets.length;
+    ctx.coverage.endpoints.discovered = nonJs.length;
+    ctx.coverage.endpoints.tested = cappedNonJs.length;
+    ctx.coverage.params.discovered = injectionCandidates.length;
+    ctx.coverage.candidatesBySource = bySource;
+    ctx.coverage.notes.push(...discoveryNotes);
     ctx.log.info({ bySource, total: injectionCandidates.length, jsAssets: jsAssets.length, notes: discoveryNotes }, "recon: injection candidates by source");
     ctx.bus.stageProgress("recon", `injection candidates: ${injectionCandidates.length} ` +
         `(discovery ${bySource.discovery} · js ${bySource.js} · openapi ${bySource.openapi} · graphql ${bySource.graphql})`, false);

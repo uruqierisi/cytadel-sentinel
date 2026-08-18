@@ -4,6 +4,7 @@ import type { ResolvedAuth } from "../config/auth.js";
 import type { LoadedScope } from "../config/scope.js";
 import { type ScopeDecision } from "../config/inScope.js";
 import { ToolRegistry } from "../lib/toolResolver.js";
+import { type RunCoverage } from "./coverage.js";
 import { RunBus } from "./events.js";
 /**
  * Per-run context threaded through every stage. Bundles the validated scope,
@@ -29,6 +30,12 @@ export interface RunContext {
      * decide which binary (e.g. Python vs ProjectDiscovery httpx) is used.
      */
     tools: ToolRegistry;
+    /**
+     * Coverage accumulator (WP4). Stages populate it — recon (discovery + caps),
+     * scan (what was fuzzed), orchestrator (auth + tool versions) — and the report
+     * renders it so the client sees what was TESTED, not only what was found.
+     */
+    coverage: RunCoverage;
 }
 export declare function createRunContext(params: {
     runId: string;

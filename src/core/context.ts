@@ -7,6 +7,7 @@ import { evaluateScope, type ScopeDecision } from "../config/inScope.js";
 import { audit } from "../lib/audit.js";
 import { runLogger } from "../lib/logger.js";
 import { ToolRegistry } from "../lib/toolResolver.js";
+import { newCoverage, type RunCoverage } from "./coverage.js";
 import { RunBus } from "./events.js";
 
 /**
@@ -33,6 +34,12 @@ export interface RunContext {
    * decide which binary (e.g. Python vs ProjectDiscovery httpx) is used.
    */
   tools: ToolRegistry;
+  /**
+   * Coverage accumulator (WP4). Stages populate it — recon (discovery + caps),
+   * scan (what was fuzzed), orchestrator (auth + tool versions) — and the report
+   * renders it so the client sees what was TESTED, not only what was found.
+   */
+  coverage: RunCoverage;
 }
 
 export function createRunContext(params: {
@@ -55,6 +62,7 @@ export function createRunContext(params: {
     log: runLogger(runId),
     bus: params.bus ?? new RunBus(),
     tools: new ToolRegistry(),
+    coverage: newCoverage(),
   };
 }
 

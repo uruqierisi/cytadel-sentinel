@@ -15,6 +15,35 @@ export interface ReportFinding {
     verified: boolean;
     active: boolean;
 }
+export interface CoverageReport {
+    hosts: {
+        discovered: number;
+        tested: number;
+    };
+    endpoints: {
+        discovered: number;
+        tested: number;
+    };
+    params: {
+        discovered: number;
+        tested: number;
+    };
+    /** authenticated | anonymous | degraded */
+    authState: string;
+    authMode: string;
+    candidatesBySource: Record<string, number>;
+    injection: {
+        get: number;
+        post: number;
+        ran: boolean;
+    };
+    tools: Array<{
+        name: string;
+        version: string;
+    }>;
+    /** Human-readable coverage limitations (caps hit, skips, empty sources). */
+    limitations: string[];
+}
 export interface ReportData {
     runId: string;
     generatedAt: string;
@@ -35,5 +64,7 @@ export interface ReportData {
     defectDojoUrl: string | null;
     severityCounts: Record<Severity, number>;
     findings: ReportFinding[];
+    /** WP4 — what was tested vs discovered, and coverage limitations. */
+    coverage: CoverageReport;
 }
 export declare function renderHtml(d: ReportData): string;
