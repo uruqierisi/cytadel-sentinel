@@ -3,6 +3,7 @@ import path from "node:path";
 import { prisma } from "../../db/client.js";
 import { audit } from "../../lib/audit.js";
 import { runDir, ensureRunDirs } from "../../lib/paths.js";
+import { authSecretValues, scrubString } from "../../lib/scrub.js";
 import { renderHtml } from "./template.js";
 const EMPTY_COUNTS = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0, INFO: 0 };
 async function collectFromLocal(runId) {
@@ -59,8 +60,12 @@ export async function runReport(ctx, engagementId) {
     const dir = runDir(ctx.runId);
     const htmlPath = path.join(dir, "report.html");
     const jsonPath = path.join(dir, "report.json");
-    await writeFile(htmlPath, renderHtml(data), "utf8");
-    await writeFile(jsonPath, JSON.stringify(data, null, 2), "utf8");
+    // Defense-in-depth: the report is built from local findings (which shouldn't
+    // contain auth material), but scrub the rendered output anyway so a session
+    // token can never reach the client-facing report.
+    const secrets = authSecretValues(ctx.auth);
+    await writeFile(htmlPath, scrubString(renderHtml(data), secrets), "utf8");
+    await writeFile(jsonPath, scrubString(JSON.stringify(data, null, 2), secrets), "utf8");
     await prisma.run.update({ where: { id: ctx.runId }, data: { reportPath: htmlPath } });
     ctx.log.info({ htmlPath, jsonPath, findings: findings.length }, "report: complete");
     await audit({

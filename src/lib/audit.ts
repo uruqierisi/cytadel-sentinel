@@ -36,7 +36,9 @@ export type AuditAction =
   | "AUTH_ESTABLISHED"
   | "AUTH_SESSION_LOST"
   | "AUTH_REESTABLISHED"
-  | "AUTH_DEGRADED";
+  | "AUTH_DEGRADED"
+  | "SECRET_SCRUB"
+  | "SECRET_LEAK";
 
 export interface AuditEvent {
   runId?: string;

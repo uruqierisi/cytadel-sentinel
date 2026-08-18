@@ -1,5 +1,6 @@
 import { audit } from "../../lib/audit.js";
-import { ensureRunDirs } from "../../lib/paths.js";
+import { ensureRunDirs, rawDir } from "../../lib/paths.js";
+import { authSecretValues, scrubTree, findSecretLeaks } from "../../lib/scrub.js";
 import { LIMITS } from "../../config/limits.js";
 import { gate, type RunContext } from "../../core/context.js";
 import type { ReconResult } from "../recon/index.js";
@@ -156,6 +157,13 @@ export async function runScan(ctx: RunContext, recon: ReconResult): Promise<Scan
     );
   }
 
+  // SECURITY: several tools echo their full command line (incl. -H
+  // "Authorization: Bearer <JWT>" / --cookie <value>) into on-disk output
+  // (sqlmap target.txt / log / session.sqlite). Scrub the session secret(s) from
+  // the ENTIRE raw tree now that all tools have finished — the plaintext token
+  // must never remain in a raw artifact.
+  await scrubRawSecrets(ctx);
+
   ctx.log.info({ artifacts: artifacts.length }, "scan: complete");
   await audit({
     runId: ctx.runId,
@@ -164,4 +172,34 @@ export async function runScan(ctx: RunContext, recon: ReconResult): Promise<Scan
     detail: { stage: "scan", artifacts: artifacts.length },
   });
   return { artifacts };
+}
+
+/** Mask session secrets across the run's raw artifacts, then verify none remain. */
+async function scrubRawSecrets(ctx: RunContext): Promise<void> {
+  const secrets = authSecretValues(ctx.auth);
+  if (secrets.length === 0) return;
+  const dir = rawDir(ctx.runId);
+  const result = await scrubTree(dir, secrets);
+  await audit({
+    runId: ctx.runId,
+    actor: ctx.actor,
+    action: "SECRET_SCRUB",
+    detail: { scope: "raw", filesModified: result.filesModified, occurrences: result.occurrences },
+  });
+  ctx.log.info(
+    { filesModified: result.filesModified, occurrences: result.occurrences },
+    "scan: scrubbed auth secrets from raw artifacts",
+  );
+
+  // Verify the scrub actually removed everything — a residual leak is loud.
+  const leaks = await findSecretLeaks(dir, secrets);
+  if (leaks.length > 0) {
+    ctx.log.error({ leaks }, "scan: SECRET LEAK — auth material still present in raw artifacts after scrub");
+    await audit({
+      runId: ctx.runId,
+      actor: ctx.actor,
+      action: "SECRET_LEAK",
+      detail: { scope: "raw", files: leaks },
+    });
+  }
 }

@@ -10,7 +10,7 @@
  * JSONL survives even if the DB is unavailable. Nothing here ever updates or
  * deletes a prior record.
  */
-export type AuditAction = "RUN_START" | "RUN_COMPLETE" | "RUN_FAILED" | "SCOPE_LOAD" | "SCOPE_ACCEPT" | "SCOPE_REJECT" | "STAGE_START" | "STAGE_COMPLETE" | "TOOL_EXEC" | "TARGET_TOUCHED" | "IMPORT" | "REPORT" | "DESTRUCTIVE_GATE" | "AUTH_ESTABLISHED" | "AUTH_SESSION_LOST" | "AUTH_REESTABLISHED" | "AUTH_DEGRADED";
+export type AuditAction = "RUN_START" | "RUN_COMPLETE" | "RUN_FAILED" | "SCOPE_LOAD" | "SCOPE_ACCEPT" | "SCOPE_REJECT" | "STAGE_START" | "STAGE_COMPLETE" | "TOOL_EXEC" | "TARGET_TOUCHED" | "IMPORT" | "REPORT" | "DESTRUCTIVE_GATE" | "AUTH_ESTABLISHED" | "AUTH_SESSION_LOST" | "AUTH_REESTABLISHED" | "AUTH_DEGRADED" | "SECRET_SCRUB" | "SECRET_LEAK";
 export interface AuditEvent {
     runId?: string;
     actor?: string;
