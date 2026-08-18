@@ -94,17 +94,52 @@ scope
         await disconnectDb().catch(() => undefined);
     }
 });
+// -------------------------------------------------------------------- roe ----
+program
+    .command("roe <scope-file>")
+    .description("Generate a ready-to-fill ROE + Authorization Letter (markdown) from a scope")
+    .option("--out <file>", "write to a file instead of stdout")
+    .action(async (scopeFile, opts) => {
+    try {
+        const { buildRoeTemplate, roeInputFromScope } = await import("./src/core/roe.js");
+        const loaded = await loadScope(scopeFile);
+        const md = buildRoeTemplate(roeInputFromScope(loaded.scope));
+        if (opts.out) {
+            const { writeFile } = await import("node:fs/promises");
+            await writeFile(opts.out, md, "utf8");
+            console.log(`ROE written to ${opts.out}`);
+        }
+        else {
+            process.stdout.write(md);
+        }
+    }
+    catch (err) {
+        if (err instanceof ScopeValidationError) {
+            console.error("✗ scope invalid:");
+            for (const issue of err.issues)
+                console.error(`  - ${issue}`);
+        }
+        else {
+            console.error("✗ roe error:", err.message);
+        }
+        process.exitCode = 1;
+    }
+    finally {
+        await disconnectDb().catch(() => undefined);
+    }
+});
 // -------------------------------------------------------------------- run ----
 program
     .command("run <scope-file>")
     .description("Run the full pipeline on-demand against a validated scope")
     .option("--allow-destructive", "permit destructive checks (also requires scope allow_destructive: true)", false)
+    .option("--i-understand-production", "explicitly confirm destructive testing against a PRODUCTION environment", false)
     .option("--detach", "enqueue the job and exit without waiting (needs a running worker)", false)
     .option("--json", "raw JSON log lines instead of the pretty CLI (auto in CI / non-TTY)", false)
     .option("--verbose", "show per-host / debug detail under each stage", false)
     .action(async (scopeFile, opts) => {
     try {
-        const { runId, jobData } = await createRun({ scopeFile, allowDestructive: opts.allowDestructive });
+        const { runId, jobData } = await createRun({ scopeFile, allowDestructive: opts.allowDestructive, confirmProduction: opts.iUnderstandProduction });
         if (opts.detach) {
             await enqueueRunJob(jobData);
             console.log(`run ${runId} queued (detached). Process with: sentinel worker`);

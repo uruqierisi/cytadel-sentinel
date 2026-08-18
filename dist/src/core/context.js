@@ -16,6 +16,7 @@ export function createRunContext(params) {
         auth: resolveAuth(loaded.scope),
         // BOTH gates must be true for destructive checks to be permitted.
         allowDestructive: loaded.scope.allow_destructive && cliAllowDestructive,
+        confirmProduction: params.confirmProduction ?? false,
         log: runLogger(runId),
         bus: params.bus ?? new RunBus(),
         tools: new ToolRegistry(),

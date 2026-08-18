@@ -2,6 +2,7 @@ import { audit } from "../../lib/audit.js";
 import { ensureRunDirs, rawDir } from "../../lib/paths.js";
 import { authSecretValues, scrubTree, findSecretLeaks } from "../../lib/scrub.js";
 import { LIMITS } from "../../config/limits.js";
+import { evaluateProductionGate } from "../../core/governance.js";
 import { gate, type RunContext } from "../../core/context.js";
 import type { ReconResult } from "../recon/index.js";
 import type { ScanArtifact } from "./artifacts.js";
@@ -54,6 +55,20 @@ export async function runScan(ctx: RunContext, recon: ReconResult): Promise<Scan
       note: "destructive checks require both scope flag and CLI --allow-destructive",
     },
   });
+  // WP6 production safety: against a production environment, destructive
+  // injection requires an explicit --i-understand-production confirmation.
+  const prodGate = evaluateProductionGate(ctx.scope, ctx.allowDestructive, ctx.confirmProduction);
+  if (ctx.allowDestructive && ctx.scope.environment === "production") {
+    await audit({
+      runId: ctx.runId,
+      actor: ctx.actor,
+      action: "ENVIRONMENT_GATE",
+      scopeHash: ctx.scopeHash,
+      detail: { environment: ctx.scope.environment, confirmProduction: ctx.confirmProduction, blocked: prodGate.blocked, reason: prodGate.reason },
+    });
+  }
+  const injectionAllowed = ctx.allowDestructive && !prodGate.blocked;
+
   await ensureRunDirs(ctx.runId);
 
   // Build in-scope target lists (defensively re-gated).
@@ -97,7 +112,7 @@ export async function runScan(ctx: RunContext, recon: ReconResult): Promise<Scan
   // Active injection (dalfox XSS + sqlmap SQLi) — STRICTLY behind the
   // destructive gate. When closed (default) we skip silently; the DESTRUCTIVE_GATE
   // audit event above already records the decision, and the report notes it.
-  if (ctx.allowDestructive) {
+  if (injectionAllowed) {
     // Seed param URLs (scope) are scope-gated with their VALUES PRESERVED — a
     // user who seeds ?q=apple means "fuzz apple". Seeds go FIRST so they always
     // survive the cap. They merge with the method-aware candidates recon already
@@ -146,16 +161,18 @@ export async function runScan(ctx: RunContext, recon: ReconResult): Promise<Scan
     const sqlmapArtifact = await runSqlmap(ctx, injectionTargets);
     if (sqlmapArtifact) artifacts.push(sqlmapArtifact);
   } else {
-    // WP4: injection didn't run — record the reason as a coverage limitation.
-    ctx.coverage.injection = {
-      get: 0,
-      post: 0,
-      ran: false,
-      skippedReason: "destructive gate closed (scope allow_destructive:false and/or no --allow-destructive)",
-    };
+    // WP4/WP6: injection didn't run — record WHY (destructive gate closed OR the
+    // production safety gate blocked it) as a coverage limitation.
+    const skippedReason = prodGate.blocked
+      ? prodGate.reason
+      : "destructive gate closed (scope allow_destructive:false and/or no --allow-destructive)";
+    ctx.coverage.injection = { get: 0, post: 0, ran: false, skippedReason };
+    if (prodGate.blocked) {
+      ctx.bus.stageProgress("scan", `active injection SKIPPED — ${skippedReason}`, false);
+    }
     ctx.log.info(
-      { paramUrls: recon.paramUrls.length },
-      "scan: active injection (dalfox/sqlmap) skipped — destructive gate closed",
+      { paramUrls: recon.paramUrls.length, skippedReason },
+      "scan: active injection (dalfox/sqlmap) skipped",
     );
   }
 

@@ -66,3 +66,30 @@ allow_destructive: false
 # an API/SPA target yields injection candidates WITHOUT manual seeds.
 # openapi_urls:
 #   - "http://127.0.0.1:3000/api-docs/swagger.json"
+
+# --- WP6 Engagement governance ------------------------------------------------
+# Client/organisation name (report header + ROE).
+# client: "Acme Corp"
+#
+# Target environment. Destructive testing against "production" requires the extra
+# --i-understand-production CLI flag; otherwise injection is skipped and noted.
+environment: "staging"      # staging | production
+#
+# Authorization WINDOW — a destructive run REFUSES to start (AUTHZ_REJECTED)
+# outside [start, end]. ISO-8601 datetimes.
+# authorization_window:
+#   start: "2026-08-18T20:00:00Z"
+#   end:   "2026-08-19T06:00:00Z"
+#
+# Rules-of-Engagement scan window — destructive scanning is refused outside these
+# allowed weekdays (0=Sun..6=Sat) / hour range [start_hour, end_hour).
+# scan_window:
+#   days: [1, 2, 3, 4, 5]     # Mon–Fri
+#   start_hour: 20            # 20:00
+#   end_hour: 24             # midnight
+#
+# Client emergency contact (report + ROE).
+# emergency_contact: "ops@acme.com — +1-555-0100 (24/7)"
+#
+# Retest: diff this run's findings against a prior run id (new/present/fixed/regressed).
+# retest_of: "<prior-run-id>"

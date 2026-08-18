@@ -8,6 +8,7 @@ export interface RunJobData {
     scopeFile: string;
     actor: string;
     allowDestructive: boolean;
+    confirmProduction: boolean;
 }
 /**
  * Create a Run row from a scope file. Validates + loads the scope, records who
@@ -19,6 +20,7 @@ export declare function createRun(params: {
     scopeFile: string;
     actor?: string;
     allowDestructive: boolean;
+    confirmProduction?: boolean;
 }): Promise<{
     runId: string;
     jobData: RunJobData;

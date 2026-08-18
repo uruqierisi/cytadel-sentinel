@@ -267,6 +267,38 @@ export declare const ScopeSchema: z.ZodObject<{
     }>>;
     rate_limit_rps: z.ZodDefault<z.ZodNumber>;
     allow_destructive: z.ZodDefault<z.ZodBoolean>;
+    /** Target environment. Production destructive testing needs extra confirmation (WP6). */
+    environment: z.ZodDefault<z.ZodEnum<["staging", "production"]>>;
+    /**
+     * Authorization WINDOW (WP6). A destructive run refuses to start outside
+     * [start, end]. Datetimes are ISO-8601 (e.g. "2026-08-18T20:00:00Z").
+     */
+    authorization_window: z.ZodOptional<z.ZodObject<{
+        start: z.ZodEffects<z.ZodString, string, string>;
+        end: z.ZodEffects<z.ZodString, string, string>;
+    }, "strip", z.ZodTypeAny, {
+        start: string;
+        end: string;
+    }, {
+        start: string;
+        end: string;
+    }>>;
+    /** Rules-of-Engagement scan window: allowed weekdays (0=Sun..6=Sat) and hour range. */
+    scan_window: z.ZodOptional<z.ZodObject<{
+        days: z.ZodOptional<z.ZodArray<z.ZodNumber, "many">>;
+        start_hour: z.ZodOptional<z.ZodNumber>;
+        end_hour: z.ZodOptional<z.ZodNumber>;
+    }, "strip", z.ZodTypeAny, {
+        days?: number[] | undefined;
+        start_hour?: number | undefined;
+        end_hour?: number | undefined;
+    }, {
+        days?: number[] | undefined;
+        start_hour?: number | undefined;
+        end_hour?: number | undefined;
+    }>>;
+    /** Client emergency contact for the ROE / report. */
+    emergency_contact: z.ZodOptional<z.ZodString>;
     /**
      * Known param URLs to inject DIRECTLY, bypassing recon discovery. Needed for
      * SPAs/APIs whose client-side/API routes katana/gau can't crawl (e.g. Juice
@@ -308,10 +340,21 @@ export declare const ScopeSchema: z.ZodObject<{
     };
     rate_limit_rps: number;
     allow_destructive: boolean;
+    environment: "staging" | "production";
     seed_param_urls: string[];
     openapi_urls: string[];
     client?: string | undefined;
     retest_of?: string | undefined;
+    authorization_window?: {
+        start: string;
+        end: string;
+    } | undefined;
+    scan_window?: {
+        days?: number[] | undefined;
+        start_hour?: number | undefined;
+        end_hour?: number | undefined;
+    } | undefined;
+    emergency_contact?: string | undefined;
 }, {
     name: string;
     authorized_by: string;
@@ -342,6 +385,17 @@ export declare const ScopeSchema: z.ZodObject<{
     } | undefined;
     rate_limit_rps?: number | undefined;
     allow_destructive?: boolean | undefined;
+    environment?: "staging" | "production" | undefined;
+    authorization_window?: {
+        start: string;
+        end: string;
+    } | undefined;
+    scan_window?: {
+        days?: number[] | undefined;
+        start_hour?: number | undefined;
+        end_hour?: number | undefined;
+    } | undefined;
+    emergency_contact?: string | undefined;
     seed_param_urls?: string[] | undefined;
     openapi_urls?: string[] | undefined;
 }>;

@@ -15,6 +15,7 @@ export interface RunJobData {
   scopeFile: string;
   actor: string;
   allowDestructive: boolean;
+  confirmProduction: boolean;
 }
 
 /**
@@ -27,6 +28,7 @@ export async function createRun(params: {
   scopeFile: string;
   actor?: string;
   allowDestructive: boolean;
+  confirmProduction?: boolean;
 }): Promise<{ runId: string; jobData: RunJobData }> {
   const actor = params.actor ?? currentActor();
   const loaded = await loadScope(params.scopeFile);
@@ -68,7 +70,7 @@ export async function createRun(params: {
 
   return {
     runId: run.id,
-    jobData: { runId: run.id, scopeFile: loaded.sourcePath, actor, allowDestructive: params.allowDestructive },
+    jobData: { runId: run.id, scopeFile: loaded.sourcePath, actor, allowDestructive: params.allowDestructive, confirmProduction: params.confirmProduction ?? false },
   };
 }
 
@@ -86,6 +88,7 @@ export async function contextForJob(data: RunJobData): Promise<RunContext> {
     actor: data.actor,
     loaded,
     cliAllowDestructive: data.allowDestructive,
+    confirmProduction: data.confirmProduction,
     // Reuse the bus the CLI reporter subscribed to (in-process runInline);
     // detached/standalone workers get a fresh, unsubscribed bus.
     bus: getBus(data.runId),

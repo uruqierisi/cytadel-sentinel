@@ -192,6 +192,7 @@ export function renderHtml(d) {
   .f-remediation{margin-top:10px;font-size:13px;color:#cdeecd}
   .f-remediation-body{margin-top:4px;color:#bcd2ee;font-size:12.5px}
   .lbl{color:var(--brand);font-weight:600}
+  .prod-banner{background:#3a0d14;border:2px solid #e0245e;color:#ffd0d8;font-weight:700}
   .retest{font-size:10px;padding:1px 6px;border-radius:5px;font-weight:700;letter-spacing:.4px}
   .retest-new{background:#e0245e;color:#fff}
   .retest-regressed{background:#e0245e;color:#fff}
@@ -214,6 +215,10 @@ export function renderHtml(d) {
   </header>
 
   ${executiveSection(d.executive)}
+
+  ${d.productionDestructive
+        ? `<div class="banner prod-banner">⚠ PRODUCTION: destructive/active-injection testing was performed against a PRODUCTION environment (explicitly authorized with --i-understand-production).</div>`
+        : ""}
 
   ${d.scope.allowDestructive
         ? `<div class="banner">⚠ Destructive checks were ENABLED for this run (scope + CLI both authorized).</div>`

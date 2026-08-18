@@ -47,7 +47,7 @@ export async function createRun(params) {
     });
     return {
         runId: run.id,
-        jobData: { runId: run.id, scopeFile: loaded.sourcePath, actor, allowDestructive: params.allowDestructive },
+        jobData: { runId: run.id, scopeFile: loaded.sourcePath, actor, allowDestructive: params.allowDestructive, confirmProduction: params.confirmProduction ?? false },
     };
 }
 /** Rebuild the RunContext for a queued job, verifying the scope hasn't drifted. */
@@ -62,6 +62,7 @@ export async function contextForJob(data) {
         actor: data.actor,
         loaded,
         cliAllowDestructive: data.allowDestructive,
+        confirmProduction: data.confirmProduction,
         // Reuse the bus the CLI reporter subscribed to (in-process runInline);
         // detached/standalone workers get a fresh, unsubscribed bus.
         bus: getBus(data.runId),

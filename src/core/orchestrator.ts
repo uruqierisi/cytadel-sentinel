@@ -3,6 +3,7 @@ import { audit } from "../lib/audit.js";
 import type { RunContext } from "./context.js";
 import type { StageId } from "./events.js";
 import { establishAuth, ensureSessionLive } from "../config/authSession.js";
+import { evaluateAuthorization, evaluateScanWindow } from "./governance.js";
 import { runRecon } from "../stages/recon/index.js";
 import { runScan } from "../stages/scan/index.js";
 import { runNormalize } from "../stages/normalize/index.js";
@@ -49,6 +50,34 @@ export async function executePipeline(ctx: RunContext): Promise<PipelineOutcome>
 
   let current: StageId = "recon";
   try {
+    // --- WP6 Engagement governance: a DESTRUCTIVE run must have a valid
+    // authorization record + window and respect the RoE scan window, or it is
+    // hard-refused (AUTHZ_REJECTED) before any network activity. This complements
+    // the technical destructive gate — it is the legal guardrail.
+    const now = new Date();
+    const authz = evaluateAuthorization(ctx.scope, ctx.allowDestructive, now);
+    const window = authz.allowed ? evaluateScanWindow(ctx.scope, ctx.allowDestructive, now) : authz;
+    if (ctx.allowDestructive && !(authz.allowed && window.allowed)) {
+      const reason = !authz.allowed ? authz.reason : window.reason;
+      await audit({
+        runId: ctx.runId,
+        actor: ctx.actor,
+        action: "AUTHZ_REJECTED",
+        scopeHash: ctx.scopeHash,
+        detail: { reason, authorizationRef: ctx.scope.authorization_ref, environment: ctx.scope.environment },
+      });
+      throw new Error(`AUTHZ_REJECTED: ${reason}`);
+    }
+    if (ctx.allowDestructive) {
+      await audit({
+        runId: ctx.runId,
+        actor: ctx.actor,
+        action: "AUTHZ_ACCEPTED",
+        scopeHash: ctx.scopeHash,
+        detail: { authz: authz.reason, window: window.reason, authorizationRef: ctx.scope.authorization_ref },
+      });
+    }
+
     // --- Resolve external tools to absolute paths BEFORE any stage runs. ---
     // This fails loudly if a required binary is present but the wrong build
     // (e.g. a Python `httpx` shadowing the ProjectDiscovery one) instead of

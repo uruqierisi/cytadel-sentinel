@@ -90,6 +90,8 @@ export interface ReportData {
         allowDestructive: boolean;
         /** WP5 report metadata. */
         client?: string | null;
+        /** WP6: staging | production. */
+        environment?: string;
     };
     actor: string;
     startedAt: string;
@@ -107,5 +109,7 @@ export interface ReportData {
     executive: ExecutiveSummary;
     /** WP5 — retest diff vs a prior engagement, when configured. */
     retest?: RetestReport | null;
+    /** WP6 — destructive/injection tests ran against a PRODUCTION environment. */
+    productionDestructive?: boolean;
 }
 export declare function renderHtml(d: ReportData): string;

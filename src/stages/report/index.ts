@@ -11,6 +11,7 @@ import { remediationFor } from "./remediation.js";
 import { cvssFor, businessImpactFor } from "./cvss.js";
 import { diffFindings } from "./retest.js";
 import { buildExecutive } from "./executive.js";
+import { buildRoeTemplate, roeInputFromScope } from "../../core/roe.js";
 import type { RunContext } from "../../core/context.js";
 
 /**
@@ -161,6 +162,7 @@ export async function runReport(ctx: RunContext, engagementId: number | null): P
       scopeHash: ctx.scopeHash,
       allowDestructive: ctx.allowDestructive,
       client: ctx.scope.client ?? null,
+      environment: ctx.scope.environment,
     },
     actor: ctx.actor,
     startedAt: run.startedAt.toISOString(),
@@ -184,6 +186,7 @@ export async function runReport(ctx: RunContext, engagementId: number | null): P
     },
     executive,
     retest,
+    productionDestructive: ctx.allowDestructive && ctx.scope.environment === "production" && ctx.coverage.injection.ran,
   };
 
   const dir = runDir(ctx.runId);
@@ -195,6 +198,11 @@ export async function runReport(ctx: RunContext, engagementId: number | null): P
   const secrets = authSecretValues(ctx.auth);
   await writeFile(htmlPath, scrubString(renderHtml(data), secrets), "utf8");
   await writeFile(jsonPath, scrubString(JSON.stringify(data, null, 2), secrets), "utf8");
+
+  // WP6: emit the ROE + Authorization Letter template alongside the report.
+  const roePath = path.join(dir, "roe.md");
+  await writeFile(roePath, buildRoeTemplate(roeInputFromScope(ctx.scope)), "utf8");
+  await audit({ runId: ctx.runId, actor: ctx.actor, action: "ROE_GENERATED", detail: { roePath } });
 
   await prisma.run.update({ where: { id: ctx.runId }, data: { reportPath: htmlPath } });
   ctx.log.info({ htmlPath, jsonPath, findings: findings.length }, "report: complete");

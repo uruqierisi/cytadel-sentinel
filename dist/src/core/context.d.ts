@@ -20,6 +20,8 @@ export interface RunContext {
     auth: ResolvedAuth;
     /** Effective: scope.allow_destructive AND the --allow-destructive CLI flag. */
     allowDestructive: boolean;
+    /** Operator confirmed production destructive testing (--i-understand-production). */
+    confirmProduction: boolean;
     log: Logger;
     /** Lifecycle event bus the reporter subscribes to. Stages emit onto it. */
     bus: RunBus;
@@ -42,6 +44,7 @@ export declare function createRunContext(params: {
     actor: string;
     loaded: LoadedScope;
     cliAllowDestructive: boolean;
+    confirmProduction?: boolean;
     bus?: RunBus;
 }): RunContext;
 /**

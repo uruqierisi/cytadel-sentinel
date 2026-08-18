@@ -119,6 +119,28 @@ export const ScopeSchema = z
     auth: AuthSchema.default({ type: "none" }),
     rate_limit_rps: z.number().int().positive().max(1000).default(10),
     allow_destructive: z.boolean().default(false),
+    /** Target environment. Production destructive testing needs extra confirmation (WP6). */
+    environment: z.enum(["staging", "production"]).default("staging"),
+    /**
+     * Authorization WINDOW (WP6). A destructive run refuses to start outside
+     * [start, end]. Datetimes are ISO-8601 (e.g. "2026-08-18T20:00:00Z").
+     */
+    authorization_window: z
+      .object({
+        start: z.string().trim().refine((s) => !Number.isNaN(Date.parse(s)), { message: "start must be a valid datetime" }),
+        end: z.string().trim().refine((s) => !Number.isNaN(Date.parse(s)), { message: "end must be a valid datetime" }),
+      })
+      .optional(),
+    /** Rules-of-Engagement scan window: allowed weekdays (0=Sun..6=Sat) and hour range. */
+    scan_window: z
+      .object({
+        days: z.array(z.number().int().min(0).max(6)).optional(),
+        start_hour: z.number().int().min(0).max(23).optional(),
+        end_hour: z.number().int().min(1).max(24).optional(),
+      })
+      .optional(),
+    /** Client emergency contact for the ROE / report. */
+    emergency_contact: z.string().trim().optional(),
     /**
      * Known param URLs to inject DIRECTLY, bypassing recon discovery. Needed for
      * SPAs/APIs whose client-side/API routes katana/gau can't crawl (e.g. Juice
