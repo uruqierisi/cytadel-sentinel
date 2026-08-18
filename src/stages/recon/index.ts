@@ -7,6 +7,10 @@ import { subfinder, httpx, katana, gau, waybackurls, naabu, type HttpxResult } f
 import { sanitizeDiscoveredUrls, capEndpointsPerHost } from "./sanitize.js";
 import { cleanParamUrls } from "./paramClean.js";
 import { paramSignature } from "../scan/params.js";
+import { analyzeJsAssets } from "./jsAnalyze.js";
+import { discoverOpenApi } from "./openapi.js";
+import { discoverGraphql } from "./graphql.js";
+import { getCandidate, countBySource, type InjectionCandidate } from "../scan/candidates.js";
 
 /**
  * Recon stage.
@@ -26,6 +30,14 @@ export interface ReconResult {
   paramUrls: string[];
   /** In-scope non-JS endpoints (capped) — reduced to base/unique paths for nuclei. */
   endpoints: string[];
+  /**
+   * Method-aware injection candidates from ALL discovery sources (discovery /
+   * JS analysis / OpenAPI / GraphQL), each already scope-gated. Fed to the
+   * active-injection tools alongside scope seeds.
+   */
+  injectionCandidates: InjectionCandidate[];
+  /** Coverage notes from GraphQL discovery (e.g. introspection disabled). */
+  graphqlNotes: string[];
   /** Count of every asset persisted this run. */
   assetCount: number;
 }
@@ -211,6 +223,29 @@ export async function runRecon(ctx: RunContext): Promise<ReconResult> {
   for (const u of endpointSet) await persistSimple(ctx, "ENDPOINT", u);
   for (const j of jsSet) await persistSimple(ctx, "JS_ASSET", j);
 
+  // --- WP2: SPA/API endpoint discovery (JS analysis, OpenAPI, GraphQL). ---
+  // These reach modern client-side/API routes that katana/gau can't crawl. Every
+  // produced URL is scope-gated inside each analyzer before it is kept.
+  const origins = collectOrigins(ctx, webTargets);
+  const discoveryCandidates = [...paramSet].map((u) => getCandidate(u, "discovery"));
+  const jsCandidates = await analyzeJsAssets(ctx, [...jsSet]);
+  const openApiCandidates = await discoverOpenApi(ctx, origins, ctx.scope.openapi_urls ?? []);
+  const graphql = await discoverGraphql(ctx, origins, cappedNonJs);
+  const injectionCandidates = [
+    ...discoveryCandidates,
+    ...jsCandidates,
+    ...openApiCandidates,
+    ...graphql.candidates,
+  ];
+  const bySource = countBySource(injectionCandidates);
+  ctx.log.info({ bySource, total: injectionCandidates.length }, "recon: injection candidates by source");
+  ctx.bus.stageProgress(
+    "recon",
+    `injection candidates: ${injectionCandidates.length} ` +
+      `(discovery ${bySource.discovery} · js ${bySource.js} · openapi ${bySource.openapi} · graphql ${bySource.graphql})`,
+    false,
+  );
+
   const assetCount = await prisma.asset.count({ where: { runId: ctx.runId } });
   ctx.log.info(
     { web: webTargets.length, endpoints: cappedNonJs.length, js: jsSet.size, assetCount },
@@ -220,7 +255,7 @@ export async function runRecon(ctx: RunContext): Promise<ReconResult> {
     runId: ctx.runId,
     actor: ctx.actor,
     action: "STAGE_COMPLETE",
-    detail: { stage: "recon", assetCount, webTargets: webTargets.length, js: jsSet.size },
+    detail: { stage: "recon", assetCount, webTargets: webTargets.length, js: jsSet.size, injectionCandidates: injectionCandidates.length },
   });
 
   return {
@@ -228,6 +263,24 @@ export async function runRecon(ctx: RunContext): Promise<ReconResult> {
     jsUrls: [...jsSet],
     paramUrls: [...paramSet],
     endpoints: cappedNonJs,
+    injectionCandidates,
+    graphqlNotes: graphql.notes,
     assetCount,
   };
+}
+
+/** Distinct scheme://host origins to probe for specs / graphql (from alive targets + scope urls). */
+function collectOrigins(ctx: RunContext, webTargets: HttpxResult[]): string[] {
+  const origins = new Set<string>();
+  const add = (raw: string): void => {
+    try {
+      const u = new URL(raw);
+      origins.add(`${u.protocol}//${u.host}`);
+    } catch {
+      /* ignore */
+    }
+  };
+  for (const t of webTargets) add(t.url);
+  for (const u of ctx.scope.in_scope.urls) add(u);
+  return [...origins];
 }

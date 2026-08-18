@@ -10,6 +10,7 @@ import { normalizeSeverity } from "../normalize/types.js";
 import { gate, type RunContext } from "../../core/context.js";
 import { resolveDalfox } from "./resolve.js";
 import { writeGenericFindingsFile, type GenericFinding } from "./generic.js";
+import type { InjectionCandidate } from "./candidates.js";
 import type { ScanArtifact } from "./artifacts.js";
 
 /**
@@ -100,53 +101,50 @@ function chunk<T>(items: T[], size: number): T[][] {
 }
 
 /**
- * @param signatures ALREADY-deduped injection signatures (path + param NAME),
- *   the SAME capped list sqlmap receives — see scan/index.ts. dalfox must never
- *   be handed the raw param URLs, or it burns its budget on duplicate params.
+ * @param candidates ALREADY-deduped, method-aware injection candidates — the
+ *   SAME capped list sqlmap receives (see scan/index.ts). GET candidates are
+ *   fuzzed via dalfox `pipe` (batched over their URLs); non-GET candidates run
+ *   in `url` mode with `-X <method> -d <body>` so POST/PUT bodies are tested too.
  */
-export async function runDalfox(ctx: RunContext, signatures: string[]): Promise<ScanArtifact | null> {
-  if (signatures.length === 0) return null;
+export async function runDalfox(ctx: RunContext, candidates: InjectionCandidate[]): Promise<ScanArtifact | null> {
+  if (candidates.length === 0) return null;
   const tool = await resolveDalfox();
   if (!tool) {
     ctx.log.warn("scan: dalfox not installed — skipping (install via scripts/setup.sh)");
     return null;
   }
 
-  // Input is already deduped + capped upstream. Re-gate defensively; never
-  // re-expand it.
-  const targets: string[] = [];
-  for (const u of signatures) {
-    if ((await gate(ctx, u)).allowed) targets.push(u);
+  // Input is already deduped + capped upstream. Re-gate defensively.
+  const targets: InjectionCandidate[] = [];
+  for (const c of candidates) {
+    if ((await gate(ctx, c.url)).allowed) targets.push(c);
   }
   if (targets.length === 0) return null;
-  // Log the FULL target list so we can confirm every signature (e.g.
-  // Search.asp?tfSearch) is fuzzed — dalfox pipe processes every stdin line, not
-  // just the last.
-  ctx.log.info({ signatures: targets.length, targets }, "scan: dalfox running over deduped signatures");
-  ctx.bus.stageProgress("scan", `dalfox: ${targets.length} deduped signature(s)`, false);
+  const getUrls = targets.filter((c) => c.method === "GET").map((c) => c.url);
+  const bodyCands = targets.filter((c) => c.method !== "GET");
+  ctx.log.info(
+    { total: targets.length, get: getUrls.length, body: bodyCands.length },
+    "scan: dalfox running over deduped candidates",
+  );
+  ctx.bus.stageProgress("scan", `dalfox: ${getUrls.length} GET + ${bodyCands.length} body candidate(s)`, false);
 
   const cfg = LIMITS.dalfox;
-  const args = [
-    ...tool.baseArgs,
-    "pipe",
+  // Common flags for both pipe and url modes (auth applies to both).
+  const commonFlags: string[] = [
     "--format",
     "json",
     "--silence",
     "--no-color",
     "--no-spinner",
-    // Speed flags so dalfox finishes and emits a complete JSON array.
     "--worker",
     String(cfg.worker),
     "--timeout",
     String(cfg.requestTimeoutSec),
   ];
-  if (cfg.skipBav) args.push("--skip-bav");
-  if (cfg.blindCallback) args.push("--blind", cfg.blindCallback);
-  // Authenticated scanning: cookie via dalfox's native --cookie, other headers via -H.
-  if (ctx.auth.cookie) args.push("--cookie", ctx.auth.cookie);
-  for (const line of ctx.auth.nonCookieHeaderLines) {
-    args.push("-H", line);
-  }
+  if (cfg.skipBav) commonFlags.push("--skip-bav");
+  if (cfg.blindCallback) commonFlags.push("--blind", cfg.blindCallback);
+  if (ctx.auth.cookie) commonFlags.push("--cookie", ctx.auth.cookie);
+  for (const line of ctx.auth.nonCookieHeaderLines) commonFlags.push("-H", line);
 
   await audit({
     runId: ctx.runId,
@@ -156,38 +154,37 @@ export async function runDalfox(ctx: RunContext, signatures: string[]): Promise<
     detail: { tool: "dalfox", stage: "scan", targets: targets.length, allowDestructive: true },
   });
 
-  const batches = chunk(targets, cfg.batchSize);
   const startedAt = Date.now();
   const byId = new Map<string, GenericFinding>();
   let done = 0;
   let budgetHit = false;
   let anyTimeout = false;
+  const overBudget = (): boolean => Date.now() - startedAt >= cfg.budgetMs;
+  const absorb = (stdout: string): void => {
+    for (const poc of parseJsonArrayLoose<Record<string, unknown>>(stdout)) {
+      const finding = dalfoxPocToFinding(poc);
+      if (finding && !byId.has(finding.uniqueId)) byId.set(finding.uniqueId, finding);
+    }
+  };
+
   const hb = startHeartbeat(ctx, "scan", "dalfox", { total: targets.length, getDone: () => done });
   try {
-    for (const batch of batches) {
-      // Overall time budget: stop launching new batches once exceeded.
-      if (Date.now() - startedAt >= cfg.budgetMs) {
+    // GET candidates via pipe (batched).
+    const pipeArgs = [...tool.baseArgs, "pipe", ...commonFlags];
+    for (const batch of chunk(getUrls, cfg.batchSize)) {
+      if (overBudget()) {
         budgetHit = true;
-        ctx.log.warn(
-          { done, total: targets.length, budgetMs: cfg.budgetMs },
-          "scan: dalfox overall budget reached — stopping (keeping findings so far)",
-        );
         ctx.bus.stageProgress("scan", `dalfox budget reached at ${done}/${targets.length} — kept findings so far`, false);
         break;
       }
       try {
-        const res = await run(tool.file, args, {
+        const res = await run(tool.file, pipeArgs, {
           input: batch.join("\n") + "\n",
           allowNonZeroExit: true,
           tolerateTimeout: true,
           timeoutMs: cfg.batchTimeoutMs,
         });
-        // Lenient array parse: a killed batch leaves an unterminated array, but
-        // every complete PoC before the cut is still recovered.
-        for (const poc of parseJsonArrayLoose<Record<string, unknown>>(res.stdout)) {
-          const finding = dalfoxPocToFinding(poc);
-          if (finding && !byId.has(finding.uniqueId)) byId.set(finding.uniqueId, finding);
-        }
+        absorb(res.stdout);
         if (res.timedOut) {
           anyTimeout = true;
           ctx.log.warn({ batch: batch.length }, "scan: dalfox PARTIAL (batch timeout) — kept parsed PoCs");
@@ -196,6 +193,28 @@ export async function runDalfox(ctx: RunContext, signatures: string[]): Promise<
         ctx.log.error({ err }, "scan: dalfox batch errored — attempting partial capture");
       }
       done += batch.length;
+    }
+
+    // Non-GET candidates via url mode with -X <method> -d <body>.
+    for (const c of bodyCands) {
+      if (overBudget()) {
+        budgetHit = true;
+        break;
+      }
+      const urlArgs = [...tool.baseArgs, "url", c.url, "-X", c.method, ...commonFlags];
+      if (c.body) urlArgs.push("-d", c.body);
+      try {
+        const res = await run(tool.file, urlArgs, {
+          allowNonZeroExit: true,
+          tolerateTimeout: true,
+          timeoutMs: cfg.batchTimeoutMs,
+        });
+        absorb(res.stdout);
+        if (res.timedOut) anyTimeout = true;
+      } catch (err) {
+        ctx.log.error({ err, url: c.url }, "scan: dalfox url-mode errored");
+      }
+      done += 1;
     }
   } finally {
     hb.stop();

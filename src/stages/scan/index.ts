@@ -6,7 +6,7 @@ import { gate, type RunContext } from "../../core/context.js";
 import type { ReconResult } from "../recon/index.js";
 import type { ScanArtifact } from "./artifacts.js";
 import { buildNucleiTargets } from "./targets.js";
-import { paramSignature, planInjectionTargets } from "./params.js";
+import { dedupeCandidates, countBySource, candidateSignature, getCandidate, type InjectionCandidate } from "./candidates.js";
 import { runNuclei } from "./nuclei.js";
 import { runTestssl } from "./testssl.js";
 import { runNikto } from "./nikto.js";
@@ -98,54 +98,34 @@ export async function runScan(ctx: RunContext, recon: ReconResult): Promise<Scan
   // destructive gate. When closed (default) we skip silently; the DESTRUCTIVE_GATE
   // audit event above already records the decision, and the report notes it.
   if (ctx.allowDestructive) {
-    // Seed param URLs bypass recon discovery (SPAs/APIs katana/gau can't crawl,
-    // e.g. Juice Shop /rest/products/search?q=). They are scope-gated but their
-    // VALUES are PRESERVED verbatim — a user who seeds ?q=apple means "fuzz
-    // apple": sqlmap's boolean/time-based blind needs a value that returns real
-    // results to stabilize, and normalizing to ?q=1 breaks detection. (Discovered
-    // params keep normalization — their risk is archived attack payloads; seeds
-    // are user-authored and intentional.) Dedupe still collapses same-signature
-    // seeds via planInjectionTargets, keeping the first real value. Seeds go
-    // FIRST so they always survive the maxInjectionTargets cap.
-    const seedCandidates = ctx.scope.seed_param_urls ?? [];
-    const gatedSeeds: string[] = [];
-    for (const u of seedCandidates) {
-      if ((await gate(ctx, u)).allowed) gatedSeeds.push(u);
+    // Seed param URLs (scope) are scope-gated with their VALUES PRESERVED — a
+    // user who seeds ?q=apple means "fuzz apple". Seeds go FIRST so they always
+    // survive the cap. They merge with the method-aware candidates recon already
+    // discovered (discovery / JS analysis / OpenAPI / GraphQL — each gated).
+    const seedUrls = ctx.scope.seed_param_urls ?? [];
+    const seedCandidates: InjectionCandidate[] = [];
+    for (const u of seedUrls) {
+      if ((await gate(ctx, u)).allowed) seedCandidates.push(getCandidate(u, "seed"));
     }
 
-    // Collapse the merged param URLs to distinct injection SIGNATURES exactly
-    // ONCE, then hand the SAME capped list to both tools. dalfox and sqlmap must
-    // run over the identical ~7-25 deduped signatures — never the raw hundreds —
-    // or they burn their budget before reaching the interesting ones.
-    const { targets: injectionTargets, fromSeeds, fromDiscovery } = planInjectionTargets(
-      gatedSeeds,
-      recon.paramUrls,
-      LIMITS.maxInjectionTargets,
-    );
+    const merged = [...seedCandidates, ...recon.injectionCandidates];
+    const injectionTargets = dedupeCandidates(merged, LIMITS.maxInjectionTargets);
+    const bySource = countBySource(injectionTargets);
 
     ctx.bus.stageProgress(
       "scan",
-      `active injection over ${injectionTargets.length} deduped signature(s) ` +
-        `(${fromSeeds} seed · ${fromDiscovery} discovered)`,
+      `active injection over ${injectionTargets.length} candidate(s) ` +
+        `(seed ${bySource.seed} · discovery ${bySource.discovery} · js ${bySource.js} · ` +
+        `openapi ${bySource.openapi} · graphql ${bySource.graphql})`,
       false,
     );
-    // Log the FINAL signature list (path + param names) both tools will fuzz, so
-    // we can confirm the real injectable endpoints are actually reached.
-    const signatureLabels = injectionTargets.map((u) => paramSignature(u) ?? u);
+    const labels = injectionTargets.map((c) => candidateSignature(c));
     ctx.log.info(
-      {
-        seedParamUrls: seedCandidates.length,
-        gatedSeeds: gatedSeeds.length,
-        rawParamUrls: recon.paramUrls.length,
-        injectionTargets: injectionTargets.length,
-        fromSeeds,
-        fromDiscovery,
-        cap: LIMITS.maxInjectionTargets,
-        signatures: signatureLabels,
-      },
-      "scan: active-injection targets (shared by dalfox + sqlmap)",
+      { total: injectionTargets.length, bySource, cap: LIMITS.maxInjectionTargets, signatures: labels },
+      "scan: active-injection candidates (shared by dalfox + sqlmap)",
     );
-    ctx.bus.stageProgress("scan", `injection signatures: ${signatureLabels.join(" · ")}`, true);
+    ctx.bus.stageProgress("scan", `injection signatures: ${labels.join(" · ")}`, true);
+
     const dalfoxArtifact = await runDalfox(ctx, injectionTargets);
     if (dalfoxArtifact) artifacts.push(dalfoxArtifact);
     const sqlmapArtifact = await runSqlmap(ctx, injectionTargets);

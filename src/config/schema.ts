@@ -122,6 +122,12 @@ export const ScopeSchema = z
      * cleaning, and signature dedupe like discovered param URLs.
      */
     seed_param_urls: z.array(UrlSchema).default([]),
+    /**
+     * Explicit OpenAPI/Swagger spec URLs to import (WP2). Common locations
+     * (/swagger.json, /openapi.json, /api-docs, /v3/api-docs) are auto-probed
+     * too. Parsed endpoints (method + example values) enter the injection set.
+     */
+    openapi_urls: z.array(UrlSchema).default([]),
   })
   .strict();
 

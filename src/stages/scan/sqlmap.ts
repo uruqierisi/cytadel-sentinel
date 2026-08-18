@@ -10,6 +10,7 @@ import { gate, type RunContext } from "../../core/context.js";
 import { resolveSqlmap } from "./resolve.js";
 import { readSqlmapSessionFindings } from "./sqlmapSession.js";
 import { writeGenericFindingsFile, type GenericFinding } from "./generic.js";
+import type { HttpMethodU, InjectionCandidate } from "./candidates.js";
 import type { ScanArtifact } from "./artifacts.js";
 
 /** Persist the raw captured stdout/stderr next to the run's output for inspection. */
@@ -40,8 +41,8 @@ async function persistRawOutput(outDir: string, stdout: string, stderr: string):
  * @param signatures ALREADY-deduped injection signatures — the SAME capped list
  *   dalfox receives (see scan/index.ts). Never the raw param URLs.
  */
-export async function runSqlmap(ctx: RunContext, signatures: string[]): Promise<ScanArtifact | null> {
-  if (signatures.length === 0) return null;
+export async function runSqlmap(ctx: RunContext, candidates: InjectionCandidate[]): Promise<ScanArtifact | null> {
+  if (candidates.length === 0) return null;
   const tool = await resolveSqlmap();
   if (!tool) {
     ctx.log.warn("scan: sqlmap not installed — skipping (install via scripts/setup.sh)");
@@ -49,9 +50,9 @@ export async function runSqlmap(ctx: RunContext, signatures: string[]): Promise<
   }
 
   // Input is already deduped + capped upstream. Re-gate defensively.
-  const targets: string[] = [];
-  for (const u of signatures) {
-    if ((await gate(ctx, u)).allowed) targets.push(u);
+  const targets: InjectionCandidate[] = [];
+  for (const c of candidates) {
+    if ((await gate(ctx, c.url)).allowed) targets.push(c);
   }
   if (targets.length === 0) return null;
   ctx.log.info({ signatures: targets.length }, "scan: sqlmap running over deduped signatures");
@@ -66,7 +67,7 @@ export async function runSqlmap(ctx: RunContext, signatures: string[]): Promise<
 
   const cfg = LIMITS.sqlmap;
   const baseOutDir = path.join(rawDir(ctx.runId), "sqlmap");
-  // Build ONE invocation per signature up front — each with its OWN output dir so
+  // Build ONE invocation per candidate up front — each with its OWN output dir so
   // same-host targets never overwrite each other's target.txt / session.sqlite.
   const invocations = planSqlmapInvocations(tool.baseArgs, targets, cfg, baseOutDir, {
     cookie: ctx.auth.cookie,
@@ -180,12 +181,16 @@ export function sqlmapTargetOutDir(baseDir: string, url: string, index: number):
   return path.join(baseDir, `t${index}_${slug}`);
 }
 
-/** Auth material + optional POST body injected into an invocation. */
+/** Auth material + method/body injected into an invocation. */
 export interface SqlmapExtra {
   /** Session cookie, injected via sqlmap's native --cookie. */
   cookie?: string | null;
   /** Non-cookie header lines ("Name: value"), injected via -H. */
   headerLines?: string[];
+  /** HTTP method; non-GET/POST is passed via --method. */
+  method?: HttpMethodU;
+  /** Request body for POST/PUT/PATCH — sqlmap tests these params via --data. */
+  data?: string | null;
 }
 
 /** Build the full sqlmap argv for a SINGLE target URL. */
@@ -217,27 +222,44 @@ export function buildSqlmapArgs(
     "--flush-session",
     `--output-dir=${outDir}`,
   ];
+  // Method-aware: a POST/PUT body is fuzzed via --data (sqlmap infers POST);
+  // non-GET/POST methods are set explicitly.
+  if (extra.data) args.push("--data", extra.data);
+  if (extra.method && extra.method !== "GET" && extra.method !== "POST") {
+    args.push(`--method=${extra.method}`);
+  }
   // Authenticated scanning: cookie via the native flag, other headers via -H.
   if (extra.cookie) args.push("--cookie", extra.cookie);
   for (const line of extra.headerLines ?? []) args.push("-H", line);
   return args;
 }
 
+/** Auth material shared across all invocations in a run. */
+export interface SqlmapAuth {
+  cookie?: string | null;
+  headerLines?: string[];
+}
+
 /**
- * Plan ONE sqlmap invocation per signature — each with its own isolated output
- * dir. This is the seam that guarantees every deduped signature is tested (never
- * collapsed to one) and is unit-testable without executing sqlmap.
+ * Plan ONE sqlmap invocation per candidate — each with its own isolated output
+ * dir, and method/body applied. Unit-testable without executing sqlmap.
  */
 export function planSqlmapInvocations(
   baseArgs: string[],
-  targets: string[],
+  candidates: InjectionCandidate[],
   cfg: SqlmapCfg,
   baseOutDir: string,
-  extra: SqlmapExtra = {},
+  auth: SqlmapAuth = {},
 ): SqlmapInvocation[] {
-  return targets.map((url, index) => {
-    const outDir = sqlmapTargetOutDir(baseOutDir, url, index);
-    return { url, outDir, args: buildSqlmapArgs(baseArgs, url, cfg, outDir, extra) };
+  return candidates.map((c, index) => {
+    const outDir = sqlmapTargetOutDir(baseOutDir, c.url + (c.body ?? ""), index);
+    const args = buildSqlmapArgs(baseArgs, c.url, cfg, outDir, {
+      cookie: auth.cookie,
+      headerLines: auth.headerLines,
+      method: c.method,
+      data: c.body,
+    });
+    return { url: c.url, outDir, args };
   });
 }
 

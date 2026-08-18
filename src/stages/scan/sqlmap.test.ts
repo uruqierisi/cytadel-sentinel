@@ -9,6 +9,7 @@ import {
   sqlmapTargetOutDir,
   type SqlmapCfg,
 } from "./sqlmap.js";
+import type { InjectionCandidate } from "./candidates.js";
 
 // Use globalThis.URL: the `URL` const below shadows the URL constructor name.
 const fixture = (name: string): string =>
@@ -124,21 +125,25 @@ describe("planSqlmapInvocations — one isolated invocation per signature", () =
     retries: 1,
   };
   const BASE_OUT = "/runs/abc/raw/sqlmap";
-  const SIGNATURES = [
+  const URLS = [
     "http://testasp.vulnweb.com/showforum.asp?id=1",
     "http://testasp.vulnweb.com/showthread.asp?id=1",
     "http://testasp.vulnweb.com/Search.asp?tfSearch=1",
     "http://testasp.vulnweb.com/Templatize.asp?item=1",
     "http://testasp.vulnweb.com/comment.asp?id=1",
   ];
+  const getCand = (url: string): InjectionCandidate => ({
+    url, method: "GET", body: null, contentType: null, paramNames: [], source: "discovery",
+  });
+  const SIGNATURES = URLS.map(getCand);
 
-  test("5 signatures => 5 invocations, one -u per URL", () => {
+  test("5 candidates => 5 invocations, one -u per URL", () => {
     const plan = planSqlmapInvocations([], SIGNATURES, CFG, BASE_OUT);
     expect(plan.length).toBe(5);
 
     // Each invocation targets exactly its own URL (nothing collapsed/dropped).
     const uOf = (args: string[]) => args[args.indexOf("-u") + 1];
-    expect(plan.map((p) => uOf(p.args))).toEqual(SIGNATURES);
+    expect(plan.map((p) => uOf(p.args))).toEqual(URLS);
 
     // The real SQLi target IS among the executed targets.
     expect(plan.some((p) => uOf(p.args) === "http://testasp.vulnweb.com/showforum.asp?id=1")).toBe(true);
@@ -172,7 +177,7 @@ describe("planSqlmapInvocations — one isolated invocation per signature", () =
   });
 
   test("non-cookie headers are appended via -H", () => {
-    const args = buildSqlmapArgs([], SIGNATURES[0]!, CFG, "/out", {
+    const args = buildSqlmapArgs([], URLS[0]!, CFG, "/out", {
       headerLines: ["X-Api-Key: abc"],
     });
     expect(args).toContain("-H");
@@ -180,10 +185,37 @@ describe("planSqlmapInvocations — one isolated invocation per signature", () =
   });
 
   test("a session cookie is injected via sqlmap's native --cookie (not -H)", () => {
-    const args = buildSqlmapArgs([], SIGNATURES[0]!, CFG, "/out", { cookie: "token=abc; sid=xyz" });
+    const args = buildSqlmapArgs([], URLS[0]!, CFG, "/out", { cookie: "token=abc; sid=xyz" });
     expect(args).toContain("--cookie");
     expect(args[args.indexOf("--cookie") + 1]).toBe("token=abc; sid=xyz");
     expect(args).not.toContain("-H"); // cookie must NOT double as a -H header
+  });
+
+  test("a POST candidate produces a sqlmap --data invocation (method-aware, WP2)", () => {
+    const postCand: InjectionCandidate = {
+      url: "http://127.0.0.1:3000/rest/user/login",
+      method: "POST",
+      body: '{"email":"test","password":"test"}',
+      contentType: "application/json",
+      paramNames: ["email", "password"],
+      source: "openapi",
+    };
+    const plan = planSqlmapInvocations([], [postCand], CFG, BASE_OUT);
+    expect(plan.length).toBe(1);
+    const args = plan[0]!.args;
+    expect(args).toContain("--data");
+    expect(args[args.indexOf("--data") + 1]).toBe('{"email":"test","password":"test"}');
+    expect(args[args.indexOf("-u") + 1]).toBe("http://127.0.0.1:3000/rest/user/login");
+  });
+
+  test("a PUT candidate sets --method=PUT alongside --data", () => {
+    const putCand: InjectionCandidate = {
+      url: "http://h/api/item/1", method: "PUT", body: "name=x", contentType: "application/x-www-form-urlencoded",
+      paramNames: ["name"], source: "openapi",
+    };
+    const args = planSqlmapInvocations([], [putCand], CFG, BASE_OUT)[0]!.args;
+    expect(args).toContain("--method=PUT");
+    expect(args).toContain("--data");
   });
 
   test("every invocation flushes the session (fresh test, no stale false-negative cache)", () => {

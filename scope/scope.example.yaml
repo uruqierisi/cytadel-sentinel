@@ -58,3 +58,11 @@ allow_destructive: false
 # Each seed URL is still scope-gated and signature-deduped like a discovered one.
 # seed_param_urls:
 #   - "http://127.0.0.1:3000/rest/products/search?q=apple"
+
+# OpenAPI/Swagger spec URLs to import (WP2). Endpoints (with methods + example
+# values) enter the injection set. Common locations (/swagger.json,
+# /openapi.json, /api-docs, /v3/api-docs) are auto-probed even without this.
+# Recon also statically analyses discovered JS bundles and probes /graphql, so
+# an API/SPA target yields injection candidates WITHOUT manual seeds.
+# openapi_urls:
+#   - "http://127.0.0.1:3000/api-docs/swagger.json"

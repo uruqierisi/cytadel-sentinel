@@ -1,5 +1,6 @@
 import { type RunContext } from "../../core/context.js";
 import { type HttpxResult } from "./tools.js";
+import { type InjectionCandidate } from "../scan/candidates.js";
 /**
  * Recon stage.
  *
@@ -17,6 +18,14 @@ export interface ReconResult {
     paramUrls: string[];
     /** In-scope non-JS endpoints (capped) — reduced to base/unique paths for nuclei. */
     endpoints: string[];
+    /**
+     * Method-aware injection candidates from ALL discovery sources (discovery /
+     * JS analysis / OpenAPI / GraphQL), each already scope-gated. Fed to the
+     * active-injection tools alongside scope seeds.
+     */
+    injectionCandidates: InjectionCandidate[];
+    /** Coverage notes from GraphQL discovery (e.g. introspection disabled). */
+    graphqlNotes: string[];
     /** Count of every asset persisted this run. */
     assetCount: number;
 }

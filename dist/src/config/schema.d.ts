@@ -270,6 +270,12 @@ export declare const ScopeSchema: z.ZodObject<{
      * cleaning, and signature dedupe like discovered param URLs.
      */
     seed_param_urls: z.ZodDefault<z.ZodArray<z.ZodEffects<z.ZodString, string, string>, "many">>;
+    /**
+     * Explicit OpenAPI/Swagger spec URLs to import (WP2). Common locations
+     * (/swagger.json, /openapi.json, /api-docs, /v3/api-docs) are auto-probed
+     * too. Parsed endpoints (method + example values) enter the injection set.
+     */
+    openapi_urls: z.ZodDefault<z.ZodArray<z.ZodEffects<z.ZodString, string, string>, "many">>;
 }, "strict", z.ZodTypeAny, {
     name: string;
     authorized_by: string;
@@ -299,6 +305,7 @@ export declare const ScopeSchema: z.ZodObject<{
     rate_limit_rps: number;
     allow_destructive: boolean;
     seed_param_urls: string[];
+    openapi_urls: string[];
 }, {
     name: string;
     authorized_by: string;
@@ -328,6 +335,7 @@ export declare const ScopeSchema: z.ZodObject<{
     rate_limit_rps?: number | undefined;
     allow_destructive?: boolean | undefined;
     seed_param_urls?: string[] | undefined;
+    openapi_urls?: string[] | undefined;
 }>;
 export type Scope = z.infer<typeof ScopeSchema>;
 export type ScopeAuth = z.infer<typeof AuthSchema>;
