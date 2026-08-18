@@ -3,6 +3,7 @@ import type { Severity } from "../normalize/types.js";
  * Cytadel-branded standalone HTML report. Fully self-contained (inline CSS, SVG
  * logo) so it can be emailed/archived. Every dynamic value is HTML-escaped.
  */
+export type RetestStatusLabel = "new" | "present" | "fixed" | "regressed";
 export interface ReportFinding {
     title: string;
     severity: Severity;
@@ -14,6 +15,40 @@ export interface ReportFinding {
     evidence: string | null;
     verified: boolean;
     active: boolean;
+    /** WP5: CWE id, CVSS v3.1 default vector/score, business impact, remediation. */
+    cwe?: number | null;
+    cvssVector?: string;
+    cvssScore?: number;
+    businessImpact?: string;
+    remediation?: {
+        summary: string;
+        guidance: string;
+    };
+    /** WP5 retest: status vs the prior engagement (undefined when not a retest). */
+    retestStatus?: RetestStatusLabel;
+}
+export interface RetestReport {
+    priorRunId: string;
+    counts: {
+        new: number;
+        present: number;
+        fixed: number;
+        regressed: number;
+    };
+    /** Findings fixed since the prior run (present then, gone now). */
+    fixed: Array<{
+        title: string;
+        severity: Severity;
+        target: string;
+    }>;
+}
+export interface ExecutiveSummary {
+    /** One-line risk posture, e.g. "High risk — 2 high-severity issues need prompt attention". */
+    posture: string;
+    /** 2-3 highest-impact issues, in business terms. */
+    topIssues: string[];
+    /** Plain-language coverage sentence. */
+    coverageLine: string;
 }
 export interface CoverageReport {
     hosts: {
@@ -53,6 +88,8 @@ export interface ReportData {
         authorizationRef: string;
         scopeHash: string;
         allowDestructive: boolean;
+        /** WP5 report metadata. */
+        client?: string | null;
     };
     actor: string;
     startedAt: string;
@@ -66,5 +103,9 @@ export interface ReportData {
     findings: ReportFinding[];
     /** WP4 — what was tested vs discovered, and coverage limitations. */
     coverage: CoverageReport;
+    /** WP5 — plain-language executive summary. */
+    executive: ExecutiveSummary;
+    /** WP5 — retest diff vs a prior engagement, when configured. */
+    retest?: RetestReport | null;
 }
 export declare function renderHtml(d: ReportData): string;

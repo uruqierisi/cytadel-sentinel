@@ -5,6 +5,8 @@ import type { Severity } from "../normalize/types.js";
  * logo) so it can be emailed/archived. Every dynamic value is HTML-escaped.
  */
 
+export type RetestStatusLabel = "new" | "present" | "fixed" | "regressed";
+
 export interface ReportFinding {
   title: string;
   severity: Severity;
@@ -16,6 +18,30 @@ export interface ReportFinding {
   evidence: string | null;
   verified: boolean;
   active: boolean;
+  /** WP5: CWE id, CVSS v3.1 default vector/score, business impact, remediation. */
+  cwe?: number | null;
+  cvssVector?: string;
+  cvssScore?: number;
+  businessImpact?: string;
+  remediation?: { summary: string; guidance: string };
+  /** WP5 retest: status vs the prior engagement (undefined when not a retest). */
+  retestStatus?: RetestStatusLabel;
+}
+
+export interface RetestReport {
+  priorRunId: string;
+  counts: { new: number; present: number; fixed: number; regressed: number };
+  /** Findings fixed since the prior run (present then, gone now). */
+  fixed: Array<{ title: string; severity: Severity; target: string }>;
+}
+
+export interface ExecutiveSummary {
+  /** One-line risk posture, e.g. "High risk — 2 high-severity issues need prompt attention". */
+  posture: string;
+  /** 2-3 highest-impact issues, in business terms. */
+  topIssues: string[];
+  /** Plain-language coverage sentence. */
+  coverageLine: string;
 }
 
 export interface CoverageReport {
@@ -41,6 +67,8 @@ export interface ReportData {
     authorizationRef: string;
     scopeHash: string;
     allowDestructive: boolean;
+    /** WP5 report metadata. */
+    client?: string | null;
   };
   actor: string;
   startedAt: string;
@@ -54,6 +82,10 @@ export interface ReportData {
   findings: ReportFinding[];
   /** WP4 — what was tested vs discovered, and coverage limitations. */
   coverage: CoverageReport;
+  /** WP5 — plain-language executive summary. */
+  executive: ExecutiveSummary;
+  /** WP5 — retest diff vs a prior engagement, when configured. */
+  retest?: RetestReport | null;
 }
 
 const SEVERITY_ORDER: Severity[] = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"];
@@ -89,26 +121,81 @@ function summaryCards(counts: Record<Severity, number>): string {
   ).join("");
 }
 
+const RETEST_LABEL: Record<RetestStatusLabel, string> = {
+  new: "NEW",
+  present: "STILL PRESENT",
+  fixed: "FIXED",
+  regressed: "REGRESSED",
+};
+
+function retestBadge(status: RetestStatusLabel | undefined): string {
+  if (!status) return "";
+  return `<span class="retest retest-${status}">${RETEST_LABEL[status]}</span>`;
+}
+
 function findingRow(f: ReportFinding): string {
   const flags = [
     f.verified ? '<span class="tag verified">verified</span>' : "",
     f.active ? "" : '<span class="tag inactive">inactive</span>',
+    retestBadge(f.retestStatus),
   ]
     .filter(Boolean)
     .join(" ");
+  const cvss =
+    f.cvssScore != null
+      ? `CVSS ${esc(f.cvssScore)}${f.cvssVector ? ` <span class="mono dim">${esc(f.cvssVector)}</span>` : ""}`
+      : f.cvss != null
+        ? "CVSS " + esc(f.cvss)
+        : "";
   return `
     <tr>
       <td>${severityBadge(f.severity)}</td>
       <td>
         <div class="f-title">${esc(f.title)} ${flags}</div>
-        <div class="f-meta">${esc(f.sourceTool)}${f.cve ? " · " + esc(f.cve) : ""}${
-          f.cvss != null ? " · CVSS " + esc(f.cvss) : ""
+        <div class="f-meta">${esc(f.sourceTool)}${f.cve ? " · " + esc(f.cve) : ""}${f.cwe ? " · CWE-" + esc(f.cwe) : ""}${
+          cvss ? " · " + cvss : ""
         }</div>
+        ${f.businessImpact ? `<div class="f-impact"><span class="lbl">Business impact:</span> ${esc(f.businessImpact)}</div>` : ""}
         ${f.description ? `<div class="f-desc">${esc(f.description).slice(0, 600)}</div>` : ""}
         ${f.evidence ? `<pre class="f-evidence">${esc(f.evidence).slice(0, 1200)}</pre>` : ""}
+        ${
+          f.remediation
+            ? `<div class="f-remediation"><span class="lbl">Remediation:</span> ${esc(f.remediation.summary)}
+                 <div class="f-remediation-body">${esc(f.remediation.guidance)}</div></div>`
+            : ""
+        }
       </td>
       <td class="f-target">${esc(f.target)}</td>
     </tr>`;
+}
+
+function executiveSection(e: ExecutiveSummary): string {
+  const issues = e.topIssues.length
+    ? e.topIssues.map((i) => `<li>${esc(i)}</li>`).join("")
+    : "<li>No exploitable issues were confirmed in the tested surface.</li>";
+  return `
+  <section class="exec">
+    <h2>Executive summary</h2>
+    <p class="exec-posture">${esc(e.posture)}</p>
+    <div class="exec-issues"><div class="k">Highest-impact issues</div><ul>${issues}</ul></div>
+    <p class="exec-coverage">${esc(e.coverageLine)}</p>
+  </section>`;
+}
+
+function retestSection(r: RetestReport): string {
+  const fixed = r.fixed.length
+    ? `<ul class="cov-lims">${r.fixed.map((f) => `<li class="ok">FIXED — ${esc(f.title)} <span class="dim">(${esc(f.target)})</span></li>`).join("")}</ul>`
+    : "";
+  return `
+  <h2>Retest — status vs previous engagement</h2>
+  <div class="meta">
+    <div><div class="k">Prior run</div><div class="v mono">${esc(r.priorRunId)}</div></div>
+    <div><div class="k">New</div><div class="v cov-bad">${r.counts.new}</div></div>
+    <div><div class="k">Regressed</div><div class="v cov-bad">${r.counts.regressed}</div></div>
+    <div><div class="k">Still present</div><div class="v cov-warn">${r.counts.present}</div></div>
+    <div><div class="k">Fixed</div><div class="v cov-ok">${r.counts.fixed}</div></div>
+  </div>
+  ${fixed}`;
 }
 
 function coverageSection(c: CoverageReport): string {
@@ -207,6 +294,23 @@ export function renderHtml(d: ReportData): string {
   .cov-lims{margin:6px 0 0;padding-left:18px;color:#cdd9ec;font-size:13px}
   .cov-lims li{margin:4px 0}
   .cov-lims li.ok{color:#2f9e6b;list-style:none;margin-left:-18px}
+  .mono{font-family:ui-monospace,Menlo,Consolas,monospace}
+  .exec{background:var(--panel);border:1px solid var(--line);border-left:4px solid var(--brand);border-radius:10px;padding:18px 20px;margin:22px 0}
+  .exec h2{margin:0 0 8px}
+  .exec-posture{font-size:16px;font-weight:600;color:var(--ink);margin:0 0 10px}
+  .exec-issues .k{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.6px}
+  .exec-issues ul{margin:6px 0 0;padding-left:18px}
+  .exec-issues li{margin:4px 0;color:#cdd9ec;font-size:14px}
+  .exec-coverage{color:var(--muted);font-size:13px;margin:12px 0 0}
+  .f-impact{margin-top:8px;font-size:13px;color:#e8d9b0}
+  .f-remediation{margin-top:10px;font-size:13px;color:#cdeecd}
+  .f-remediation-body{margin-top:4px;color:#bcd2ee;font-size:12.5px}
+  .lbl{color:var(--brand);font-weight:600}
+  .retest{font-size:10px;padding:1px 6px;border-radius:5px;font-weight:700;letter-spacing:.4px}
+  .retest-new{background:#e0245e;color:#fff}
+  .retest-regressed{background:#e0245e;color:#fff}
+  .retest-present{background:#f5b301;color:#08131f}
+  .retest-fixed{background:#2f9e6b;color:#fff}
   .banner{margin:20px 0;padding:10px 14px;border-radius:8px;background:#1a1230;border:1px solid #6b3fa0;color:#d9c6ff;font-size:13px}
   footer{margin-top:36px;color:var(--muted);font-size:12px;border-top:1px solid var(--line);padding-top:16px}
   a{color:var(--brand)}
@@ -218,9 +322,14 @@ export function renderHtml(d: ReportData): string {
     ${LOGO}
     <div>
       <h1><span class="brand-mark">CYTADEL</span> SENTINEL — Security Report</h1>
-      <div class="sub">Authorized web-application penetration test · Run ${esc(d.runId)}</div>
+      <div class="sub">Authorized web-application penetration test${
+        d.scope.client ? ` · Client: ${esc(d.scope.client)}` : ""
+      } · Engagement: ${esc(d.scope.name)}</div>
+      <div class="sub">Tester: ${esc(d.actor)} · ${esc(d.startedAt.slice(0, 10))} → ${esc(d.finishedAt.slice(0, 10))} · Run ${esc(d.runId)}</div>
     </div>
   </header>
+
+  ${executiveSection(d.executive)}
 
   ${
     d.scope.allowDestructive
@@ -239,7 +348,8 @@ export function renderHtml(d: ReportData): string {
   </div>
 
   <div class="meta">
-    <div><div class="k">Scope</div><div class="v">${esc(d.scope.name)}</div></div>
+    <div><div class="k">Client</div><div class="v">${esc(d.scope.client ?? "—")}</div></div>
+    <div><div class="k">Engagement</div><div class="v">${esc(d.scope.name)}</div></div>
     <div><div class="k">Authorized by</div><div class="v">${esc(d.scope.authorizedBy)}</div></div>
     <div><div class="k">Authorization ref</div><div class="v">${esc(d.scope.authorizationRef)}</div></div>
     <div><div class="k">Scope hash</div><div class="v">${esc(d.scope.scopeHash.slice(0, 24))}…</div></div>
@@ -250,6 +360,8 @@ export function renderHtml(d: ReportData): string {
   </div>
 
   ${coverageSection(d.coverage)}
+
+  ${d.retest ? retestSection(d.retest) : ""}
 
   <h2>Severity summary</h2>
   <div class="cards">${summaryCards(d.severityCounts)}</div>

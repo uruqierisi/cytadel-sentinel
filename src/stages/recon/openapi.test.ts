@@ -135,6 +135,9 @@ describe("discoverOpenApi — live probe (auto-probe common locations)", () => {
     );
     const { candidates, notes } = await discoverOpenApi(ctxFor(), ["http://127.0.0.1:3000"], [], http);
     expect(candidates).toEqual([]);
-    expect(notes.some((n) => n.includes("200 but body was not valid JSON"))).toBe(true);
+    // The repeated non-JSON probes collapse into ONE coverage note.
+    expect(notes.length).toBe(1);
+    expect(notes[0]).toMatch(/not exposed as JSON/);
+    expect(notes[0]).toMatch(/returned non-JSON/);
   });
 });

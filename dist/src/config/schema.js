@@ -84,6 +84,10 @@ export const ScopeSchema = z
     name: z.string().trim().min(1),
     authorized_by: z.string().trim().min(1),
     authorization_ref: z.string().trim().min(1),
+    /** Client/organisation name for the report header (WP5). */
+    client: z.string().trim().optional(),
+    /** Prior run id to diff against for a retest report (WP5). */
+    retest_of: z.string().trim().optional(),
     in_scope: z
         .object({
         domains: z.array(DomainSchema).default([]),

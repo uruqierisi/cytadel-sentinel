@@ -62,6 +62,12 @@ function baseData(findings: ReportFinding[]): ReportData {
       tools: [{ name: "sqlmap", version: "1.8.8" }],
       limitations: [],
     },
+    executive: {
+      posture: "High risk — 1 high-severity issue needs prompt attention.",
+      topIssues: ["HIGH — SQL Injection on parameter q: An attacker could read the database."],
+      coverageLine: "Testing was authenticated. 1/1 host(s) exercised.",
+    },
+    retest: null,
   };
 }
 
@@ -111,5 +117,44 @@ describe("renderHtml — the seeded SQLi shows in the HTML report", () => {
     expect(out).toContain("DEGRADED");
     expect(out).toContain("no parseable spec found");
     expect(out).toContain("cov-bad"); // degraded auth styled prominently
+  });
+
+  test("WP5: executive summary + per-finding remediation/CVSS/business-impact render", () => {
+    const f = reportFindingFromSqlmap();
+    f.cwe = 89;
+    f.cvssVector = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N";
+    f.cvssScore = 9.1;
+    f.businessImpact = "An attacker could read or modify the application database.";
+    f.remediation = { summary: "Use parameterized queries.", guidance: "Bind values with prepared statements." };
+    const data = baseData([f]);
+    data.executive = {
+      posture: "High risk — 1 high-severity issue needs prompt attention.",
+      topIssues: ["HIGH — SQL Injection: An attacker could read the database."],
+      coverageLine: "Testing was authenticated.",
+    };
+    const out = renderHtml(data);
+    expect(out).toContain("Executive summary");
+    expect(out).toContain("High risk");
+    expect(out).toContain("Remediation:");
+    expect(out).toContain("parameterized queries");
+    expect(out).toContain("CVSS:3.1/AV:N"); // v3.1 vector
+    expect(out).toContain("Business impact:");
+    expect(out).toContain("CWE-89");
+  });
+
+  test("WP5: retest status badge renders per finding and a retest section", () => {
+    const f = reportFindingFromSqlmap();
+    f.retestStatus = "regressed";
+    const data = baseData([f]);
+    data.retest = {
+      priorRunId: "prev-run-1",
+      counts: { new: 1, present: 2, fixed: 3, regressed: 1 },
+      fixed: [{ title: "Old XSS", severity: "MEDIUM", target: "http://h/x?y=1" }],
+    };
+    const out = renderHtml(data);
+    expect(out).toContain("REGRESSED");
+    expect(out).toContain("status vs previous engagement");
+    expect(out).toContain("prev-run-1");
+    expect(out).toContain("Old XSS"); // fixed finding listed
   });
 });

@@ -222,6 +222,7 @@ export async function discoverOpenApi(
   const notes: string[] = [];
   let probed = 0;
   let specsFound = 0;
+  let nonJson = 0;
   for (const specUrl of specUrls) {
     if (!(await gate(ctx, specUrl)).allowed) continue;
     probed++;
@@ -243,11 +244,11 @@ export async function discoverOpenApi(
     try {
       spec = JSON.parse(res.body);
     } catch (err) {
-      ctx.log.warn(
-        { specUrl, status: res.status, bodyLen: res.body.length, truncated: res.truncated, error: (err as Error).message },
+      nonJson++;
+      ctx.log.info(
+        { specUrl, status: res.status, bodyLen: res.body.length, truncated: res.truncated },
         "recon: OpenAPI 200 but body is not JSON",
       );
-      notes.push(`OpenAPI: ${specUrl} returned 200 but body was not valid JSON (${res.body.length} bytes${res.truncated ? ", TRUNCATED" : ""})`);
       continue;
     }
     const version = specVersion(spec);
@@ -266,6 +267,13 @@ export async function discoverOpenApi(
     }
   }
   ctx.log.info({ probed, specsFound, candidates: candidates.length }, "recon: OpenAPI discovery complete");
-  if (specsFound === 0) notes.push(`OpenAPI: probed ${probed} location(s), no parseable spec found`);
+  if (specsFound === 0) {
+    // Collapse the repeated per-probe "not valid JSON" lines into ONE.
+    notes.push(
+      nonJson > 0
+        ? `OpenAPI: not exposed as JSON — ${nonJson} of ${probed} probed location(s) returned non-JSON (likely Swagger UI/HTML).`
+        : `OpenAPI: not found — ${probed} location(s) probed, none served a spec.`,
+    );
+  }
   return { candidates, notes };
 }

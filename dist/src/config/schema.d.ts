@@ -120,6 +120,10 @@ export declare const ScopeSchema: z.ZodObject<{
     name: z.ZodString;
     authorized_by: z.ZodString;
     authorization_ref: z.ZodString;
+    /** Client/organisation name for the report header (WP5). */
+    client: z.ZodOptional<z.ZodString>;
+    /** Prior run id to diff against for a retest report (WP5). */
+    retest_of: z.ZodOptional<z.ZodString>;
     in_scope: z.ZodEffects<z.ZodObject<{
         domains: z.ZodDefault<z.ZodArray<z.ZodEffects<z.ZodString, string, string>, "many">>;
         urls: z.ZodDefault<z.ZodArray<z.ZodEffects<z.ZodString, string, string>, "many">>;
@@ -306,6 +310,8 @@ export declare const ScopeSchema: z.ZodObject<{
     allow_destructive: boolean;
     seed_param_urls: string[];
     openapi_urls: string[];
+    client?: string | undefined;
+    retest_of?: string | undefined;
 }, {
     name: string;
     authorized_by: string;
@@ -314,6 +320,8 @@ export declare const ScopeSchema: z.ZodObject<{
         domains?: string[] | undefined;
         urls?: string[] | undefined;
     };
+    client?: string | undefined;
+    retest_of?: string | undefined;
     exclusions?: {
         paths?: string[] | undefined;
         domains?: string[] | undefined;
