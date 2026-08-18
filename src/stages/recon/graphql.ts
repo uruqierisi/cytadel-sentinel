@@ -110,10 +110,17 @@ export async function discoverGraphql(
         method: "POST",
         headers: { "content-type": "application/json", ...ctx.auth.headerMap },
         body: JSON.stringify({ query: INTROSPECTION_QUERY }),
+        maxBodyBytes: 8 * 1024 * 1024,
+        maxRedirections: 3,
       });
-    } catch {
+    } catch (err) {
+      ctx.log.warn({ endpoint, error: (err as Error).message }, "recon: FETCH GraphQL introspection FAILED");
       continue;
     }
+    ctx.log.info(
+      { endpoint, status: res.status, bodyLen: res.body.length, contentType: res.headers["content-type"] },
+      "recon: FETCH GraphQL introspection",
+    );
     if (res.status < 200 || res.status >= 300) continue;
 
     let json: unknown;

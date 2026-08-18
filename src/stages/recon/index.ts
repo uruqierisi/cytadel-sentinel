@@ -7,7 +7,7 @@ import { subfinder, httpx, katana, gau, waybackurls, naabu, type HttpxResult } f
 import { sanitizeDiscoveredUrls, capEndpointsPerHost } from "./sanitize.js";
 import { cleanParamUrls } from "./paramClean.js";
 import { paramSignature } from "../scan/params.js";
-import { analyzeJsAssets } from "./jsAnalyze.js";
+import { analyzeJsAssets, collectScriptAssets } from "./jsAnalyze.js";
 import { discoverOpenApi } from "./openapi.js";
 import { discoverGraphql } from "./graphql.js";
 import { getCandidate, countBySource, type InjectionCandidate } from "../scan/candidates.js";
@@ -36,8 +36,8 @@ export interface ReconResult {
    * active-injection tools alongside scope seeds.
    */
   injectionCandidates: InjectionCandidate[];
-  /** Coverage notes from GraphQL discovery (e.g. introspection disabled). */
-  graphqlNotes: string[];
+  /** Coverage notes from WP2 discovery (JS/OpenAPI/GraphQL — why a source was empty). */
+  discoveryNotes: string[];
   /** Count of every asset persisted this run. */
   assetCount: number;
 }
@@ -227,24 +227,45 @@ export async function runRecon(ctx: RunContext): Promise<ReconResult> {
   // These reach modern client-side/API routes that katana/gau can't crawl. Every
   // produced URL is scope-gated inside each analyzer before it is kept.
   const origins = collectOrigins(ctx, webTargets);
+  ctx.log.info({ origins }, "recon: WP2 discovery origins");
+  const discoveryNotes: string[] = [];
+  if (origins.length === 0) discoveryNotes.push("WP2: no in-scope origins to probe (JS/OpenAPI/GraphQL skipped)");
+
   const discoveryCandidates = [...paramSet].map((u) => getCandidate(u, "discovery"));
-  const jsCandidates = await analyzeJsAssets(ctx, [...jsSet]);
-  const openApiCandidates = await discoverOpenApi(ctx, origins, ctx.scope.openapi_urls ?? []);
+
+  // JS: SPAs reference bundles in index.html, not via katana/gau — expand the JS
+  // asset list from <script src> in the base HTML, then analyse every bundle.
+  const scripts = await collectScriptAssets(ctx, origins);
+  discoveryNotes.push(...scripts.notes);
+  const jsAssets = [...new Set([...jsSet, ...scripts.assets])];
+  ctx.log.info({ fromRecon: jsSet.size, fromHtml: scripts.assets.length, total: jsAssets.length }, "recon: JS assets for analysis");
+  const jsCandidates = await analyzeJsAssets(ctx, jsAssets);
+
+  const openApi = await discoverOpenApi(ctx, origins, ctx.scope.openapi_urls ?? []);
+  discoveryNotes.push(...openApi.notes);
+
   const graphql = await discoverGraphql(ctx, origins, cappedNonJs);
+  discoveryNotes.push(...graphql.notes);
+
   const injectionCandidates = [
     ...discoveryCandidates,
     ...jsCandidates,
-    ...openApiCandidates,
+    ...openApi.candidates,
     ...graphql.candidates,
   ];
   const bySource = countBySource(injectionCandidates);
-  ctx.log.info({ bySource, total: injectionCandidates.length }, "recon: injection candidates by source");
+  ctx.log.info(
+    { bySource, total: injectionCandidates.length, jsAssets: jsAssets.length, notes: discoveryNotes },
+    "recon: injection candidates by source",
+  );
   ctx.bus.stageProgress(
     "recon",
     `injection candidates: ${injectionCandidates.length} ` +
       `(discovery ${bySource.discovery} · js ${bySource.js} · openapi ${bySource.openapi} · graphql ${bySource.graphql})`,
     false,
   );
+  // Surface why a source is empty so a live run never shows a silent 0.
+  for (const note of discoveryNotes) ctx.bus.stageProgress("recon", `discovery: ${note}`, true);
 
   const assetCount = await prisma.asset.count({ where: { runId: ctx.runId } });
   ctx.log.info(
@@ -264,7 +285,7 @@ export async function runRecon(ctx: RunContext): Promise<ReconResult> {
     paramUrls: [...paramSet],
     endpoints: cappedNonJs,
     injectionCandidates,
-    graphqlNotes: graphql.notes,
+    discoveryNotes,
     assetCount,
   };
 }

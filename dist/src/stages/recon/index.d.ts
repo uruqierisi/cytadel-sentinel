@@ -24,8 +24,8 @@ export interface ReconResult {
      * active-injection tools alongside scope seeds.
      */
     injectionCandidates: InjectionCandidate[];
-    /** Coverage notes from GraphQL discovery (e.g. introspection disabled). */
-    graphqlNotes: string[];
+    /** Coverage notes from WP2 discovery (JS/OpenAPI/GraphQL — why a source was empty). */
+    discoveryNotes: string[];
     /** Count of every asset persisted this run. */
     assetCount: number;
 }
