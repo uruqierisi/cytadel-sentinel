@@ -1,5 +1,6 @@
 import { prisma } from "../db/client.js";
 import { audit } from "../lib/audit.js";
+import { establishAuth, ensureSessionLive } from "../config/authSession.js";
 import { runRecon } from "../stages/recon/index.js";
 import { runScan } from "../stages/scan/index.js";
 import { runNormalize } from "../stages/normalize/index.js";
@@ -31,6 +32,15 @@ export async function executePipeline(ctx) {
         // (e.g. a Python `httpx` shadowing the ProjectDiscovery one) instead of
         // letting recon drift to a silent 0-result outcome.
         await ctx.tools.resolveAll(ctx.log);
+        // --- Authenticated session ---
+        // For form_login, log in and capture the session BEFORE recon so every tool
+        // scans past login. A failure degrades to anonymous (loud + audited), never
+        // a silent unauthenticated scan.
+        await establishAuth(ctx);
+        if (ctx.auth.enabled) {
+            await ensureSessionLive(ctx);
+            ctx.bus.stageProgress("recon", ctx.auth.degraded ? "auth: session DEGRADED — scanning anonymously" : "auth: session active", false);
+        }
         // --- Recon ---
         current = "recon";
         ctx.bus.stageStart("recon", "Recon");
@@ -39,6 +49,10 @@ export async function executePipeline(ctx) {
         ctx.bus.stageDone("recon", `${recon.webTargets.length} web targets · ${recon.assetCount} assets · ${recon.jsUrls.length} JS`);
         // --- Scan ---
         current = "scan";
+        // Re-verify the session before the (longer) scan stage; re-login if it
+        // dropped during recon.
+        if (ctx.auth.enabled)
+            await ensureSessionLive(ctx);
         ctx.bus.stageStart("scan", "Scan");
         await prisma.run.update({ where: { id: ctx.runId }, data: { status: "SCAN" } });
         const scan = await runScan(ctx, recon);

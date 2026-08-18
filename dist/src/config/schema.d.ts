@@ -1,21 +1,106 @@
 import { z } from "zod";
 /** Accept an FQDN/wildcard, "localhost", or a bare IPv4 address (local lab testing). */
 export declare function isValidScopeDomain(d: string): boolean;
-export declare const AuthSchema: z.ZodEffects<z.ZodObject<{
-    type: z.ZodDefault<z.ZodEnum<["cookie", "header", "none"]>>;
+export declare const AuthSchema: z.ZodEffects<z.ZodEffects<z.ZodObject<{
+    type: z.ZodDefault<z.ZodEnum<["cookie", "header", "form_login", "none"]>>;
     session: z.ZodOptional<z.ZodString>;
+    /** URL the login form/API POSTs to. */
+    login_url: z.ZodOptional<z.ZodString>;
+    /** Request field/JSON key for the username (e.g. "email"). */
+    username_field: z.ZodOptional<z.ZodString>;
+    /** Request field/JSON key for the password. */
+    password_field: z.ZodOptional<z.ZodString>;
+    /** ENV VAR NAME holding the username value (never the value itself). */
+    username: z.ZodOptional<z.ZodString>;
+    /** ENV VAR NAME holding the password value (never the value itself). */
+    password: z.ZodOptional<z.ZodString>;
+    /** Body encoding for the login request. */
+    content_type: z.ZodDefault<z.ZodEnum<["form", "json"]>>;
+    /**
+     * Dot-path into a JSON login response to pull a bearer token, e.g.
+     * "authentication.token" (Juice Shop). Session cookies are captured
+     * automatically from Set-Cookie regardless.
+     */
+    token_json_pointer: z.ZodOptional<z.ZodString>;
+    /**
+     * A string (body substring) or 3-digit status that means "logged in". Used
+     * for the session-liveness check. Optional: default liveness is a 2xx.
+     */
+    success_indicator: z.ZodOptional<z.ZodString>;
+    /** URL to hit for the liveness check (an authenticated page). */
+    session_check_url: z.ZodOptional<z.ZodString>;
 }, "strip", z.ZodTypeAny, {
-    type: "cookie" | "header" | "none";
+    type: "cookie" | "header" | "form_login" | "none";
+    content_type: "json" | "form";
+    password?: string | undefined;
     session?: string | undefined;
+    login_url?: string | undefined;
+    username_field?: string | undefined;
+    password_field?: string | undefined;
+    username?: string | undefined;
+    token_json_pointer?: string | undefined;
+    success_indicator?: string | undefined;
+    session_check_url?: string | undefined;
 }, {
-    type?: "cookie" | "header" | "none" | undefined;
+    password?: string | undefined;
+    type?: "cookie" | "header" | "form_login" | "none" | undefined;
     session?: string | undefined;
+    login_url?: string | undefined;
+    username_field?: string | undefined;
+    password_field?: string | undefined;
+    username?: string | undefined;
+    content_type?: "json" | "form" | undefined;
+    token_json_pointer?: string | undefined;
+    success_indicator?: string | undefined;
+    session_check_url?: string | undefined;
 }>, {
-    type: "cookie" | "header" | "none";
+    type: "cookie" | "header" | "form_login" | "none";
+    content_type: "json" | "form";
+    password?: string | undefined;
     session?: string | undefined;
+    login_url?: string | undefined;
+    username_field?: string | undefined;
+    password_field?: string | undefined;
+    username?: string | undefined;
+    token_json_pointer?: string | undefined;
+    success_indicator?: string | undefined;
+    session_check_url?: string | undefined;
 }, {
-    type?: "cookie" | "header" | "none" | undefined;
+    password?: string | undefined;
+    type?: "cookie" | "header" | "form_login" | "none" | undefined;
     session?: string | undefined;
+    login_url?: string | undefined;
+    username_field?: string | undefined;
+    password_field?: string | undefined;
+    username?: string | undefined;
+    content_type?: "json" | "form" | undefined;
+    token_json_pointer?: string | undefined;
+    success_indicator?: string | undefined;
+    session_check_url?: string | undefined;
+}>, {
+    type: "cookie" | "header" | "form_login" | "none";
+    content_type: "json" | "form";
+    password?: string | undefined;
+    session?: string | undefined;
+    login_url?: string | undefined;
+    username_field?: string | undefined;
+    password_field?: string | undefined;
+    username?: string | undefined;
+    token_json_pointer?: string | undefined;
+    success_indicator?: string | undefined;
+    session_check_url?: string | undefined;
+}, {
+    password?: string | undefined;
+    type?: "cookie" | "header" | "form_login" | "none" | undefined;
+    session?: string | undefined;
+    login_url?: string | undefined;
+    username_field?: string | undefined;
+    password_field?: string | undefined;
+    username?: string | undefined;
+    content_type?: "json" | "form" | undefined;
+    token_json_pointer?: string | undefined;
+    success_indicator?: string | undefined;
+    session_check_url?: string | undefined;
 }>;
 export declare const ScopeSchema: z.ZodObject<{
     name: z.ZodString;
@@ -41,27 +126,112 @@ export declare const ScopeSchema: z.ZodObject<{
         domains: z.ZodDefault<z.ZodArray<z.ZodEffects<z.ZodString, string, string>, "many">>;
         paths: z.ZodDefault<z.ZodArray<z.ZodEffects<z.ZodString, string, string>, "many">>;
     }, "strip", z.ZodTypeAny, {
-        domains: string[];
         paths: string[];
+        domains: string[];
     }, {
-        domains?: string[] | undefined;
         paths?: string[] | undefined;
+        domains?: string[] | undefined;
     }>>;
-    auth: z.ZodDefault<z.ZodEffects<z.ZodObject<{
-        type: z.ZodDefault<z.ZodEnum<["cookie", "header", "none"]>>;
+    auth: z.ZodDefault<z.ZodEffects<z.ZodEffects<z.ZodObject<{
+        type: z.ZodDefault<z.ZodEnum<["cookie", "header", "form_login", "none"]>>;
         session: z.ZodOptional<z.ZodString>;
+        /** URL the login form/API POSTs to. */
+        login_url: z.ZodOptional<z.ZodString>;
+        /** Request field/JSON key for the username (e.g. "email"). */
+        username_field: z.ZodOptional<z.ZodString>;
+        /** Request field/JSON key for the password. */
+        password_field: z.ZodOptional<z.ZodString>;
+        /** ENV VAR NAME holding the username value (never the value itself). */
+        username: z.ZodOptional<z.ZodString>;
+        /** ENV VAR NAME holding the password value (never the value itself). */
+        password: z.ZodOptional<z.ZodString>;
+        /** Body encoding for the login request. */
+        content_type: z.ZodDefault<z.ZodEnum<["form", "json"]>>;
+        /**
+         * Dot-path into a JSON login response to pull a bearer token, e.g.
+         * "authentication.token" (Juice Shop). Session cookies are captured
+         * automatically from Set-Cookie regardless.
+         */
+        token_json_pointer: z.ZodOptional<z.ZodString>;
+        /**
+         * A string (body substring) or 3-digit status that means "logged in". Used
+         * for the session-liveness check. Optional: default liveness is a 2xx.
+         */
+        success_indicator: z.ZodOptional<z.ZodString>;
+        /** URL to hit for the liveness check (an authenticated page). */
+        session_check_url: z.ZodOptional<z.ZodString>;
     }, "strip", z.ZodTypeAny, {
-        type: "cookie" | "header" | "none";
+        type: "cookie" | "header" | "form_login" | "none";
+        content_type: "json" | "form";
+        password?: string | undefined;
         session?: string | undefined;
+        login_url?: string | undefined;
+        username_field?: string | undefined;
+        password_field?: string | undefined;
+        username?: string | undefined;
+        token_json_pointer?: string | undefined;
+        success_indicator?: string | undefined;
+        session_check_url?: string | undefined;
     }, {
-        type?: "cookie" | "header" | "none" | undefined;
+        password?: string | undefined;
+        type?: "cookie" | "header" | "form_login" | "none" | undefined;
         session?: string | undefined;
+        login_url?: string | undefined;
+        username_field?: string | undefined;
+        password_field?: string | undefined;
+        username?: string | undefined;
+        content_type?: "json" | "form" | undefined;
+        token_json_pointer?: string | undefined;
+        success_indicator?: string | undefined;
+        session_check_url?: string | undefined;
     }>, {
-        type: "cookie" | "header" | "none";
+        type: "cookie" | "header" | "form_login" | "none";
+        content_type: "json" | "form";
+        password?: string | undefined;
         session?: string | undefined;
+        login_url?: string | undefined;
+        username_field?: string | undefined;
+        password_field?: string | undefined;
+        username?: string | undefined;
+        token_json_pointer?: string | undefined;
+        success_indicator?: string | undefined;
+        session_check_url?: string | undefined;
     }, {
-        type?: "cookie" | "header" | "none" | undefined;
+        password?: string | undefined;
+        type?: "cookie" | "header" | "form_login" | "none" | undefined;
         session?: string | undefined;
+        login_url?: string | undefined;
+        username_field?: string | undefined;
+        password_field?: string | undefined;
+        username?: string | undefined;
+        content_type?: "json" | "form" | undefined;
+        token_json_pointer?: string | undefined;
+        success_indicator?: string | undefined;
+        session_check_url?: string | undefined;
+    }>, {
+        type: "cookie" | "header" | "form_login" | "none";
+        content_type: "json" | "form";
+        password?: string | undefined;
+        session?: string | undefined;
+        login_url?: string | undefined;
+        username_field?: string | undefined;
+        password_field?: string | undefined;
+        username?: string | undefined;
+        token_json_pointer?: string | undefined;
+        success_indicator?: string | undefined;
+        session_check_url?: string | undefined;
+    }, {
+        password?: string | undefined;
+        type?: "cookie" | "header" | "form_login" | "none" | undefined;
+        session?: string | undefined;
+        login_url?: string | undefined;
+        username_field?: string | undefined;
+        password_field?: string | undefined;
+        username?: string | undefined;
+        content_type?: "json" | "form" | undefined;
+        token_json_pointer?: string | undefined;
+        success_indicator?: string | undefined;
+        session_check_url?: string | undefined;
     }>>;
     rate_limit_rps: z.ZodDefault<z.ZodNumber>;
     allow_destructive: z.ZodDefault<z.ZodBoolean>;
@@ -81,12 +251,21 @@ export declare const ScopeSchema: z.ZodObject<{
         urls: string[];
     };
     exclusions: {
-        domains: string[];
         paths: string[];
+        domains: string[];
     };
     auth: {
-        type: "cookie" | "header" | "none";
+        type: "cookie" | "header" | "form_login" | "none";
+        content_type: "json" | "form";
+        password?: string | undefined;
         session?: string | undefined;
+        login_url?: string | undefined;
+        username_field?: string | undefined;
+        password_field?: string | undefined;
+        username?: string | undefined;
+        token_json_pointer?: string | undefined;
+        success_indicator?: string | undefined;
+        session_check_url?: string | undefined;
     };
     rate_limit_rps: number;
     allow_destructive: boolean;
@@ -100,12 +279,21 @@ export declare const ScopeSchema: z.ZodObject<{
         urls?: string[] | undefined;
     };
     exclusions?: {
-        domains?: string[] | undefined;
         paths?: string[] | undefined;
+        domains?: string[] | undefined;
     } | undefined;
     auth?: {
-        type?: "cookie" | "header" | "none" | undefined;
+        password?: string | undefined;
+        type?: "cookie" | "header" | "form_login" | "none" | undefined;
         session?: string | undefined;
+        login_url?: string | undefined;
+        username_field?: string | undefined;
+        password_field?: string | undefined;
+        username?: string | undefined;
+        content_type?: "json" | "form" | undefined;
+        token_json_pointer?: string | undefined;
+        success_indicator?: string | undefined;
+        session_check_url?: string | undefined;
     } | undefined;
     rate_limit_rps?: number | undefined;
     allow_destructive?: boolean | undefined;

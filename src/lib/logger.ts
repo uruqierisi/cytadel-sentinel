@@ -27,7 +27,28 @@ function fileDestination(): pino.DestinationStream {
 
 const destination = PRETTY_MODE ? fileDestination() : pino.destination(1); // fd 1 = stdout
 
-export const logger = pino({ level }, destination);
+/**
+ * Defense-in-depth redaction: even though secret values are never intentionally
+ * passed to the logger, censor common credential-bearing keys so an accidental
+ * `log.info({ headers })` can never leak a cookie/token to the file log.
+ */
+const REDACT_PATHS = [
+  "cookie",
+  "Cookie",
+  "authorization",
+  "Authorization",
+  "set-cookie",
+  "password",
+  "token",
+  "headerMap.Cookie",
+  "headerMap.Authorization",
+  "*.cookie",
+  "*.authorization",
+  "*.password",
+  "*.token",
+];
+
+export const logger = pino({ level, redact: { paths: REDACT_PATHS, censor: "***" } }, destination);
 
 /** Child logger bound to a run id so every line is correlatable. */
 export function runLogger(runId: string) {

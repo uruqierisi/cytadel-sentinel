@@ -171,10 +171,19 @@ describe("planSqlmapInvocations — one isolated invocation per signature", () =
     expect(a).not.toBe(b);
   });
 
-  test("headers are appended to each invocation", () => {
-    const args = buildSqlmapArgs([], SIGNATURES[0]!, CFG, "/out", ["Cookie: a=b"]);
+  test("non-cookie headers are appended via -H", () => {
+    const args = buildSqlmapArgs([], SIGNATURES[0]!, CFG, "/out", {
+      headerLines: ["X-Api-Key: abc"],
+    });
     expect(args).toContain("-H");
-    expect(args[args.indexOf("-H") + 1]).toBe("Cookie: a=b");
+    expect(args[args.indexOf("-H") + 1]).toBe("X-Api-Key: abc");
+  });
+
+  test("a session cookie is injected via sqlmap's native --cookie (not -H)", () => {
+    const args = buildSqlmapArgs([], SIGNATURES[0]!, CFG, "/out", { cookie: "token=abc; sid=xyz" });
+    expect(args).toContain("--cookie");
+    expect(args[args.indexOf("--cookie") + 1]).toBe("token=abc; sid=xyz");
+    expect(args).not.toContain("-H"); // cookie must NOT double as a -H header
   });
 
   test("every invocation flushes the session (fresh test, no stale false-negative cache)", () => {

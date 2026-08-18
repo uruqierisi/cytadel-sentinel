@@ -32,7 +32,11 @@ export type AuditAction =
   | "TARGET_TOUCHED"
   | "IMPORT"
   | "REPORT"
-  | "DESTRUCTIVE_GATE";
+  | "DESTRUCTIVE_GATE"
+  | "AUTH_ESTABLISHED"
+  | "AUTH_SESSION_LOST"
+  | "AUTH_REESTABLISHED"
+  | "AUTH_DEGRADED";
 
 export interface AuditEvent {
   runId?: string;

@@ -39,14 +39,51 @@ const PathPrefixSchema = z
 
 export const AuthSchema = z
   .object({
-    type: z.enum(["cookie", "header", "none"]).default("none"),
+    type: z.enum(["cookie", "header", "form_login", "none"]).default("none"),
     // Name of the env var that holds the secret — never the secret itself.
     session: z.string().trim().optional(),
+
+    // --- form_login (type: "form_login") ---
+    /** URL the login form/API POSTs to. */
+    login_url: z.string().trim().url().optional(),
+    /** Request field/JSON key for the username (e.g. "email"). */
+    username_field: z.string().trim().optional(),
+    /** Request field/JSON key for the password. */
+    password_field: z.string().trim().optional(),
+    /** ENV VAR NAME holding the username value (never the value itself). */
+    username: z.string().trim().optional(),
+    /** ENV VAR NAME holding the password value (never the value itself). */
+    password: z.string().trim().optional(),
+    /** Body encoding for the login request. */
+    content_type: z.enum(["form", "json"]).default("form"),
+    /**
+     * Dot-path into a JSON login response to pull a bearer token, e.g.
+     * "authentication.token" (Juice Shop). Session cookies are captured
+     * automatically from Set-Cookie regardless.
+     */
+    token_json_pointer: z.string().trim().optional(),
+    /**
+     * A string (body substring) or 3-digit status that means "logged in". Used
+     * for the session-liveness check. Optional: default liveness is a 2xx.
+     */
+    success_indicator: z.string().trim().optional(),
+    /** URL to hit for the liveness check (an authenticated page). */
+    session_check_url: z.string().trim().url().optional(),
   })
-  .refine((a) => a.type === "none" || (a.session && a.session.length > 0), {
+  .refine((a) => a.type !== "cookie" && a.type !== "header" ? true : Boolean(a.session && a.session.length > 0), {
     message: 'auth.session (env var name) is required when auth.type is "cookie" or "header"',
     path: ["session"],
-  });
+  })
+  .refine(
+    (a) =>
+      a.type !== "form_login" ||
+      Boolean(a.login_url && a.username_field && a.password_field && a.username && a.password),
+    {
+      message:
+        'auth.type "form_login" requires login_url, username_field, password_field, username (env var name), password (env var name)',
+      path: ["type"],
+    },
+  );
 
 export const ScopeSchema = z
   .object({

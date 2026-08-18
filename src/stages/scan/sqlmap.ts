@@ -68,7 +68,10 @@ export async function runSqlmap(ctx: RunContext, signatures: string[]): Promise<
   const baseOutDir = path.join(rawDir(ctx.runId), "sqlmap");
   // Build ONE invocation per signature up front — each with its OWN output dir so
   // same-host targets never overwrite each other's target.txt / session.sqlite.
-  const invocations = planSqlmapInvocations(tool.baseArgs, targets, cfg, baseOutDir, ctx.auth.headerLines);
+  const invocations = planSqlmapInvocations(tool.baseArgs, targets, cfg, baseOutDir, {
+    cookie: ctx.auth.cookie,
+    headerLines: ctx.auth.nonCookieHeaderLines,
+  });
   ctx.log.info(
     { targets: invocations.map((i) => i.url) },
     "scan: sqlmap invocations (one -u run per signature, isolated output dir)",
@@ -177,13 +180,21 @@ export function sqlmapTargetOutDir(baseDir: string, url: string, index: number):
   return path.join(baseDir, `t${index}_${slug}`);
 }
 
+/** Auth material + optional POST body injected into an invocation. */
+export interface SqlmapExtra {
+  /** Session cookie, injected via sqlmap's native --cookie. */
+  cookie?: string | null;
+  /** Non-cookie header lines ("Name: value"), injected via -H. */
+  headerLines?: string[];
+}
+
 /** Build the full sqlmap argv for a SINGLE target URL. */
 export function buildSqlmapArgs(
   baseArgs: string[],
   url: string,
   cfg: SqlmapCfg,
   outDir: string,
-  headerLines: string[] = [],
+  extra: SqlmapExtra = {},
 ): string[] {
   const args = [
     ...baseArgs,
@@ -206,7 +217,9 @@ export function buildSqlmapArgs(
     "--flush-session",
     `--output-dir=${outDir}`,
   ];
-  for (const line of headerLines) args.push("-H", line);
+  // Authenticated scanning: cookie via the native flag, other headers via -H.
+  if (extra.cookie) args.push("--cookie", extra.cookie);
+  for (const line of extra.headerLines ?? []) args.push("-H", line);
   return args;
 }
 
@@ -220,11 +233,11 @@ export function planSqlmapInvocations(
   targets: string[],
   cfg: SqlmapCfg,
   baseOutDir: string,
-  headerLines: string[] = [],
+  extra: SqlmapExtra = {},
 ): SqlmapInvocation[] {
   return targets.map((url, index) => {
     const outDir = sqlmapTargetOutDir(baseOutDir, url, index);
-    return { url, outDir, args: buildSqlmapArgs(baseArgs, url, cfg, outDir, headerLines) };
+    return { url, outDir, args: buildSqlmapArgs(baseArgs, url, cfg, outDir, extra) };
   });
 }
 

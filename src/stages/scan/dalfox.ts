@@ -142,7 +142,9 @@ export async function runDalfox(ctx: RunContext, signatures: string[]): Promise<
   ];
   if (cfg.skipBav) args.push("--skip-bav");
   if (cfg.blindCallback) args.push("--blind", cfg.blindCallback);
-  for (const line of ctx.auth.headerLines) {
+  // Authenticated scanning: cookie via dalfox's native --cookie, other headers via -H.
+  if (ctx.auth.cookie) args.push("--cookie", ctx.auth.cookie);
+  for (const line of ctx.auth.nonCookieHeaderLines) {
     args.push("-H", line);
   }
 
