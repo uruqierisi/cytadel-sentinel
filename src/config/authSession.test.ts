@@ -63,7 +63,7 @@ const formLoginScope = {
     password: "SENTINEL_TEST_PASS",
     content_type: "json",
     token_json_pointer: "/authentication/token", // RFC 6901 (Juice Shop)
-    success_indicator: "Welcome back",
+    // No success_indicator: use DEFAULT liveness (2xx + anon cross-check).
     session_check_url: "http://127.0.0.1:3000/rest/user/whoami",
   },
 };
@@ -123,13 +123,24 @@ describe("pure helpers", () => {
     expect(pointerTokens("a.b")).toEqual(["a", "b"]);
   });
 
-  test("isSessionLive: 2xx live, 3xx/401 lost, indicator status + body", () => {
+  test("isSessionLive default mode: 2xx live, 3xx/401/403 lost", () => {
     expect(isSessionLive(res({ status: 200 }))).toBe(true);
     expect(isSessionLive(res({ status: 302 }))).toBe(false);
     expect(isSessionLive(res({ status: 401 }))).toBe(false);
-    expect(isSessionLive(res({ status: 403 }), "200")).toBe(false);
-    expect(isSessionLive(res({ status: 200, body: "Welcome back" }), "Welcome back")).toBe(true);
-    expect(isSessionLive(res({ status: 200, body: "login please" }), "Welcome back")).toBe(false);
+    expect(isSessionLive(res({ status: 403 }))).toBe(false);
+  });
+
+  test("isSessionLive explicit status mode (success_status)", () => {
+    expect(isSessionLive(res({ status: 200 }), { status: 200 })).toBe(true);
+    expect(isSessionLive(res({ status: 204 }), { status: 200 })).toBe(false);
+    // {"user":{}} at 200 is 'live' under status mode — no body string required.
+    expect(isSessionLive(res({ status: 200, body: '{"user":{}}' }), { status: 200 })).toBe(true);
+  });
+
+  test("isSessionLive body-indicator mode (and legacy 3-digit status)", () => {
+    expect(isSessionLive(res({ status: 200, body: "Welcome back" }), { indicator: "Welcome back" })).toBe(true);
+    expect(isSessionLive(res({ status: 200, body: "login please" }), { indicator: "Welcome back" })).toBe(false);
+    expect(isSessionLive(res({ status: 403 }), { indicator: "200" })).toBe(false);
   });
 });
 
@@ -176,33 +187,53 @@ describe("establishAuth — login and inject", () => {
     expect(actions).toContain("AUTH_ESTABLISHED");
   });
 
-  test("Juice Shop end-to-end: /authentication/token -> Bearer -> whoami -> AUTH_ESTABLISHED", async () => {
+  test("Juice Shop end-to-end: token -> Bearer -> whoami {\"user\":{}} 200/401 -> stays established", async () => {
     const ctx = makeCtx(formLoginScope);
     const http = vi.fn(async (url: string, opts?: { method?: string; headers?: Record<string, string> }) => {
       if (opts?.method === "POST") {
-        // Exact Juice Shop login body shape.
         return res({ status: 200, body: JSON.stringify({ authentication: { token: SECRET_TOKEN } }) });
       }
-      // whoami: only returns the user when the Bearer header is present.
+      // The Juice Shop quirk: whoami returns {"user":{}} 200 WITH the Bearer, 401 without.
       const authed = opts?.headers?.Authorization === `Bearer ${SECRET_TOKEN}`;
-      return res({ status: authed ? 200 : 401, body: authed ? "Welcome back admin" : "unauthorized" });
+      return authed ? res({ status: 200, body: '{"user":{}}' }) : res({ status: 401, body: "unauthorized" });
     });
 
     await establishAuth(ctx, http);
     expect(ctx.auth.enabled).toBe(true);
     expect(ctx.auth.headerMap.Authorization).toBe(`Bearer ${SECRET_TOKEN}`);
 
-    // The session-check now succeeds using the Bearer header.
+    // DEFAULT liveness: authed 200 + anon 401 differ => confirmed, NOT degraded.
     const live = await ensureSessionLive(ctx, http);
     expect(live).toBe(true);
     expect(ctx.auth.degraded).toBe(false);
 
-    // whoami was called with the Authorization header.
-    const whoami = http.mock.calls.find((c) => (c[1] as { method?: string })?.method !== "POST");
-    expect((whoami![1] as { headers: Record<string, string> }).headers.Authorization).toBe(`Bearer ${SECRET_TOKEN}`);
-
     const actions = auditMock.mock.calls.map((c) => (c[0] as { action: string }).action);
     expect(actions).toContain("AUTH_ESTABLISHED");
+    expect(actions).not.toContain("AUTH_SESSION_LOST"); // no false loss
+    expect(actions).not.toContain("AUTH_DEGRADED");
+  });
+
+  test("default liveness stays alive when check URL 401s anonymously and 200s with token", async () => {
+    const ctx = makeCtx(formLoginScope);
+    ctx.auth.enabled = true;
+    ctx.auth.headerMap = { Authorization: `Bearer ${SECRET_TOKEN}` };
+    const http = vi.fn(async (_url: string, opts?: { headers?: Record<string, string> }) =>
+      opts?.headers?.Authorization ? res({ status: 200, body: '{"user":{}}' }) : res({ status: 401 }),
+    );
+    expect(await ensureSessionLive(ctx, http)).toBe(true);
+    expect(ctx.auth.degraded).toBe(false);
+    const actions = auditMock.mock.calls.map((c) => (c[0] as { action: string }).action);
+    expect(actions).not.toContain("AUTH_SESSION_LOST");
+  });
+
+  test("default liveness: a poor check URL (200 with AND without auth) stays alive but warns", async () => {
+    const ctx = makeCtx(formLoginScope);
+    ctx.auth.enabled = true;
+    ctx.auth.headerMap = { Authorization: `Bearer ${SECRET_TOKEN}` };
+    // Same 200 body regardless of auth (the whoami-is-a-poor-choice case).
+    const http = vi.fn(async () => res({ status: 200, body: '{"user":{}}' }));
+    expect(await ensureSessionLive(ctx, http)).toBe(true); // not falsely degraded
+    expect(ctx.auth.degraded).toBe(false);
   });
 
   test("failed login degrades to anonymous and audits AUTH_SESSION_LOST", async () => {

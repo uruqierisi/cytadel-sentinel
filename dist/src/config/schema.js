@@ -55,11 +55,19 @@ export const AuthSchema = z
      */
     token_json_pointer: z.string().trim().optional(),
     /**
-     * A string (body substring) or 3-digit status that means "logged in". Used
-     * for the session-liveness check. Optional: default liveness is a 2xx.
+     * Liveness modes, in priority: (1) success_status — the check URL returns
+     * this status when authenticated; (2) success_indicator — a body substring
+     * (or 3-digit status) that means logged-in; (3) DEFAULT (neither set) — a 2xx
+     * that is NOT a 401/403, cross-checked against an anonymous request.
      */
+    success_status: z.number().int().min(100).max(599).optional(),
     success_indicator: z.string().trim().optional(),
-    /** URL to hit for the liveness check (an authenticated page). */
+    /**
+     * URL to hit for the liveness check. Pick an endpoint that returns 401/403
+     * when UNAUTHENTICATED so the auth/anon difference is detectable — e.g. a
+     * protected resource, NOT an endpoint that returns 200 either way (Juice
+     * Shop's /rest/user/whoami returns 200 anonymously and is a poor choice).
+     */
     session_check_url: z.string().trim().url().optional(),
 })
     .refine((a) => a.type !== "cookie" && a.type !== "header" ? true : Boolean(a.session && a.session.length > 0), {

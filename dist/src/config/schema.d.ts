@@ -23,11 +23,19 @@ export declare const AuthSchema: z.ZodEffects<z.ZodEffects<z.ZodObject<{
      */
     token_json_pointer: z.ZodOptional<z.ZodString>;
     /**
-     * A string (body substring) or 3-digit status that means "logged in". Used
-     * for the session-liveness check. Optional: default liveness is a 2xx.
+     * Liveness modes, in priority: (1) success_status — the check URL returns
+     * this status when authenticated; (2) success_indicator — a body substring
+     * (or 3-digit status) that means logged-in; (3) DEFAULT (neither set) — a 2xx
+     * that is NOT a 401/403, cross-checked against an anonymous request.
      */
+    success_status: z.ZodOptional<z.ZodNumber>;
     success_indicator: z.ZodOptional<z.ZodString>;
-    /** URL to hit for the liveness check (an authenticated page). */
+    /**
+     * URL to hit for the liveness check. Pick an endpoint that returns 401/403
+     * when UNAUTHENTICATED so the auth/anon difference is detectable — e.g. a
+     * protected resource, NOT an endpoint that returns 200 either way (Juice
+     * Shop's /rest/user/whoami returns 200 anonymously and is a poor choice).
+     */
     session_check_url: z.ZodOptional<z.ZodString>;
 }, "strip", z.ZodTypeAny, {
     type: "cookie" | "header" | "form_login" | "none";
@@ -39,6 +47,7 @@ export declare const AuthSchema: z.ZodEffects<z.ZodEffects<z.ZodObject<{
     password_field?: string | undefined;
     username?: string | undefined;
     token_json_pointer?: string | undefined;
+    success_status?: number | undefined;
     success_indicator?: string | undefined;
     session_check_url?: string | undefined;
 }, {
@@ -51,6 +60,7 @@ export declare const AuthSchema: z.ZodEffects<z.ZodEffects<z.ZodObject<{
     username?: string | undefined;
     content_type?: "json" | "form" | undefined;
     token_json_pointer?: string | undefined;
+    success_status?: number | undefined;
     success_indicator?: string | undefined;
     session_check_url?: string | undefined;
 }>, {
@@ -63,6 +73,7 @@ export declare const AuthSchema: z.ZodEffects<z.ZodEffects<z.ZodObject<{
     password_field?: string | undefined;
     username?: string | undefined;
     token_json_pointer?: string | undefined;
+    success_status?: number | undefined;
     success_indicator?: string | undefined;
     session_check_url?: string | undefined;
 }, {
@@ -75,6 +86,7 @@ export declare const AuthSchema: z.ZodEffects<z.ZodEffects<z.ZodObject<{
     username?: string | undefined;
     content_type?: "json" | "form" | undefined;
     token_json_pointer?: string | undefined;
+    success_status?: number | undefined;
     success_indicator?: string | undefined;
     session_check_url?: string | undefined;
 }>, {
@@ -87,6 +99,7 @@ export declare const AuthSchema: z.ZodEffects<z.ZodEffects<z.ZodObject<{
     password_field?: string | undefined;
     username?: string | undefined;
     token_json_pointer?: string | undefined;
+    success_status?: number | undefined;
     success_indicator?: string | undefined;
     session_check_url?: string | undefined;
 }, {
@@ -99,6 +112,7 @@ export declare const AuthSchema: z.ZodEffects<z.ZodEffects<z.ZodObject<{
     username?: string | undefined;
     content_type?: "json" | "form" | undefined;
     token_json_pointer?: string | undefined;
+    success_status?: number | undefined;
     success_indicator?: string | undefined;
     session_check_url?: string | undefined;
 }>;
@@ -154,11 +168,19 @@ export declare const ScopeSchema: z.ZodObject<{
          */
         token_json_pointer: z.ZodOptional<z.ZodString>;
         /**
-         * A string (body substring) or 3-digit status that means "logged in". Used
-         * for the session-liveness check. Optional: default liveness is a 2xx.
+         * Liveness modes, in priority: (1) success_status — the check URL returns
+         * this status when authenticated; (2) success_indicator — a body substring
+         * (or 3-digit status) that means logged-in; (3) DEFAULT (neither set) — a 2xx
+         * that is NOT a 401/403, cross-checked against an anonymous request.
          */
+        success_status: z.ZodOptional<z.ZodNumber>;
         success_indicator: z.ZodOptional<z.ZodString>;
-        /** URL to hit for the liveness check (an authenticated page). */
+        /**
+         * URL to hit for the liveness check. Pick an endpoint that returns 401/403
+         * when UNAUTHENTICATED so the auth/anon difference is detectable — e.g. a
+         * protected resource, NOT an endpoint that returns 200 either way (Juice
+         * Shop's /rest/user/whoami returns 200 anonymously and is a poor choice).
+         */
         session_check_url: z.ZodOptional<z.ZodString>;
     }, "strip", z.ZodTypeAny, {
         type: "cookie" | "header" | "form_login" | "none";
@@ -170,6 +192,7 @@ export declare const ScopeSchema: z.ZodObject<{
         password_field?: string | undefined;
         username?: string | undefined;
         token_json_pointer?: string | undefined;
+        success_status?: number | undefined;
         success_indicator?: string | undefined;
         session_check_url?: string | undefined;
     }, {
@@ -182,6 +205,7 @@ export declare const ScopeSchema: z.ZodObject<{
         username?: string | undefined;
         content_type?: "json" | "form" | undefined;
         token_json_pointer?: string | undefined;
+        success_status?: number | undefined;
         success_indicator?: string | undefined;
         session_check_url?: string | undefined;
     }>, {
@@ -194,6 +218,7 @@ export declare const ScopeSchema: z.ZodObject<{
         password_field?: string | undefined;
         username?: string | undefined;
         token_json_pointer?: string | undefined;
+        success_status?: number | undefined;
         success_indicator?: string | undefined;
         session_check_url?: string | undefined;
     }, {
@@ -206,6 +231,7 @@ export declare const ScopeSchema: z.ZodObject<{
         username?: string | undefined;
         content_type?: "json" | "form" | undefined;
         token_json_pointer?: string | undefined;
+        success_status?: number | undefined;
         success_indicator?: string | undefined;
         session_check_url?: string | undefined;
     }>, {
@@ -218,6 +244,7 @@ export declare const ScopeSchema: z.ZodObject<{
         password_field?: string | undefined;
         username?: string | undefined;
         token_json_pointer?: string | undefined;
+        success_status?: number | undefined;
         success_indicator?: string | undefined;
         session_check_url?: string | undefined;
     }, {
@@ -230,6 +257,7 @@ export declare const ScopeSchema: z.ZodObject<{
         username?: string | undefined;
         content_type?: "json" | "form" | undefined;
         token_json_pointer?: string | undefined;
+        success_status?: number | undefined;
         success_indicator?: string | undefined;
         session_check_url?: string | undefined;
     }>>;
@@ -264,6 +292,7 @@ export declare const ScopeSchema: z.ZodObject<{
         password_field?: string | undefined;
         username?: string | undefined;
         token_json_pointer?: string | undefined;
+        success_status?: number | undefined;
         success_indicator?: string | undefined;
         session_check_url?: string | undefined;
     };
@@ -292,6 +321,7 @@ export declare const ScopeSchema: z.ZodObject<{
         username?: string | undefined;
         content_type?: "json" | "form" | undefined;
         token_json_pointer?: string | undefined;
+        success_status?: number | undefined;
         success_indicator?: string | undefined;
         session_check_url?: string | undefined;
     } | undefined;
