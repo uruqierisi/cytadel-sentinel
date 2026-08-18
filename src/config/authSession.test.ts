@@ -9,6 +9,7 @@ vi.mock("../lib/audit.js", () => ({ audit: (...a: unknown[]) => auditMock(...a) 
 import {
   parseSetCookies,
   extractJsonPointer,
+  pointerTokens,
   isSessionLive,
   performFormLogin,
   establishAuth,
@@ -61,7 +62,7 @@ const formLoginScope = {
     username: "SENTINEL_TEST_USER",
     password: "SENTINEL_TEST_PASS",
     content_type: "json",
-    token_json_pointer: "authentication.token",
+    token_json_pointer: "/authentication/token", // RFC 6901 (Juice Shop)
     success_indicator: "Welcome back",
     session_check_url: "http://127.0.0.1:3000/rest/user/whoami",
   },
@@ -104,11 +105,22 @@ describe("pure helpers", () => {
     expect(parseSetCookies(undefined)).toBeNull();
   });
 
-  test("extractJsonPointer navigates a dot-path", () => {
+  test("extractJsonPointer resolves RFC 6901 (/a/b) AND dot-notation (a.b)", () => {
+    // The exact Juice Shop login body + pointer from the bug report.
+    const juice = '{"authentication":{"token":"eyJ.EXACTTOKEN.sig"}}';
+    expect(extractJsonPointer(juice, "/authentication/token")).toBe("eyJ.EXACTTOKEN.sig");
+
     const body = JSON.stringify({ authentication: { token: SECRET_TOKEN } });
-    expect(extractJsonPointer(body, "authentication.token")).toBe(SECRET_TOKEN);
-    expect(extractJsonPointer(body, "authentication.missing")).toBeNull();
-    expect(extractJsonPointer("not json", "a.b")).toBeNull();
+    expect(extractJsonPointer(body, "/authentication/token")).toBe(SECRET_TOKEN); // slash form
+    expect(extractJsonPointer(body, "authentication.token")).toBe(SECRET_TOKEN); // dot form
+    expect(extractJsonPointer(body, "/authentication/missing")).toBeNull();
+    expect(extractJsonPointer("not json", "/a/b")).toBeNull();
+  });
+
+  test("pointerTokens handles ~1/~0 escaping and both notations", () => {
+    expect(pointerTokens("/a/b")).toEqual(["a", "b"]);
+    expect(pointerTokens("/a~1b/c")).toEqual(["a/b", "c"]); // ~1 -> /
+    expect(pointerTokens("a.b")).toEqual(["a", "b"]);
   });
 
   test("isSessionLive: 2xx live, 3xx/401 lost, indicator status + body", () => {
@@ -159,6 +171,35 @@ describe("establishAuth — login and inject", () => {
     expect(ctx.auth.headerMap.Authorization).toBe(`Bearer ${SECRET_TOKEN}`);
     expect(ctx.auth.nonCookieHeaderLines).toContain(`Authorization: Bearer ${SECRET_TOKEN}`);
     expect(ctx.auth.redactedHeaderLines).toEqual(["Authorization: ***"]);
+
+    const actions = auditMock.mock.calls.map((c) => (c[0] as { action: string }).action);
+    expect(actions).toContain("AUTH_ESTABLISHED");
+  });
+
+  test("Juice Shop end-to-end: /authentication/token -> Bearer -> whoami -> AUTH_ESTABLISHED", async () => {
+    const ctx = makeCtx(formLoginScope);
+    const http = vi.fn(async (url: string, opts?: { method?: string; headers?: Record<string, string> }) => {
+      if (opts?.method === "POST") {
+        // Exact Juice Shop login body shape.
+        return res({ status: 200, body: JSON.stringify({ authentication: { token: SECRET_TOKEN } }) });
+      }
+      // whoami: only returns the user when the Bearer header is present.
+      const authed = opts?.headers?.Authorization === `Bearer ${SECRET_TOKEN}`;
+      return res({ status: authed ? 200 : 401, body: authed ? "Welcome back admin" : "unauthorized" });
+    });
+
+    await establishAuth(ctx, http);
+    expect(ctx.auth.enabled).toBe(true);
+    expect(ctx.auth.headerMap.Authorization).toBe(`Bearer ${SECRET_TOKEN}`);
+
+    // The session-check now succeeds using the Bearer header.
+    const live = await ensureSessionLive(ctx, http);
+    expect(live).toBe(true);
+    expect(ctx.auth.degraded).toBe(false);
+
+    // whoami was called with the Authorization header.
+    const whoami = http.mock.calls.find((c) => (c[1] as { method?: string })?.method !== "POST");
+    expect((whoami![1] as { headers: Record<string, string> }).headers.Authorization).toBe(`Bearer ${SECRET_TOKEN}`);
 
     const actions = auditMock.mock.calls.map((c) => (c[0] as { action: string }).action);
     expect(actions).toContain("AUTH_ESTABLISHED");

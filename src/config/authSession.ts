@@ -37,16 +37,34 @@ export function parseSetCookies(raw: string | string[] | undefined): string | nu
   return pairs.length ? pairs.join("; ") : null;
 }
 
-/** Navigate a dot-path into a parsed JSON body (e.g. "authentication.token"). */
+/**
+ * Split a pointer into tokens. Supports RFC 6901 JSON Pointer ("/a/b", leading
+ * slash, `~1`->`/`, `~0`->`~`) AND legacy dot-notation ("a.b").
+ */
+export function pointerTokens(pointer: string): string[] {
+  if (pointer.startsWith("/")) {
+    return pointer
+      .split("/")
+      .slice(1)
+      .map((t) => t.replace(/~1/g, "/").replace(/~0/g, "~"));
+  }
+  return pointer.split(".");
+}
+
+/**
+ * Resolve a token/cookie value from a JSON body via a pointer. Accepts RFC 6901
+ * ("/authentication/token", as Juice Shop uses) or dot-notation
+ * ("authentication.token"). Returns the string value, or null if the body isn't
+ * JSON or the pointer doesn't resolve to a non-empty string.
+ */
 export function extractJsonPointer(body: string, pointer: string): string | null {
-  let doc: unknown;
+  let cur: unknown;
   try {
-    doc = JSON.parse(body);
+    cur = JSON.parse(body);
   } catch {
     return null;
   }
-  let cur: unknown = doc;
-  for (const key of pointer.split(".")) {
+  for (const key of pointerTokens(pointer)) {
     if (cur && typeof cur === "object" && key in (cur as Record<string, unknown>)) {
       cur = (cur as Record<string, unknown>)[key];
     } else {
@@ -108,9 +126,29 @@ export async function performFormLogin(
   }
 
   const cookie = parseSetCookies(res.headers["set-cookie"] as string | string[] | undefined);
-  const bearer = a.token_json_pointer ? extractJsonPointer(res.body, a.token_json_pointer) : null;
+  let bearer: string | null = null;
+  if (a.token_json_pointer) {
+    let jsonParsed = true;
+    try {
+      JSON.parse(res.body);
+    } catch {
+      jsonParsed = false;
+    }
+    bearer = extractJsonPointer(res.body, a.token_json_pointer);
+    // Redacted diagnostics: never the token value — only whether it resolved.
+    log.info(
+      {
+        status: res.status,
+        jsonParsed,
+        pointer: a.token_json_pointer,
+        tokenFound: bearer !== null,
+        tokenLength: bearer?.length ?? 0,
+      },
+      "auth: form_login token extraction",
+    );
+  }
   if (!cookie && !bearer) {
-    log.warn({ status: res.status }, "auth: form_login yielded no cookie or token");
+    log.warn({ status: res.status, cookieFound: Boolean(cookie) }, "auth: form_login yielded no cookie or token");
     return null;
   }
 
